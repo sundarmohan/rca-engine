@@ -1,0 +1,16 @@
+services:
+  rca-engine:
+    build: .
+    container_name: multicloud-rca-engine
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m,noexec,nosuid
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
