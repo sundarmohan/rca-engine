@@ -6,7 +6,8 @@ import subprocess
 import sys
 import time
 from urllib.parse import unquote, urlsplit
-from urllib.request import urlopen
+from urllib.request import Request, urlopen
+from urllib.error import HTTPError
 
 
 def main():
@@ -74,6 +75,21 @@ def main():
                 time.sleep(3)
             else:
                 raise RuntimeError("Verified public HTTPS readiness failed; check DNS and inbound TCP 80/443")
+            origin = "https://" + environment["RCA_PUBLIC_DOMAIN"]
+            with urlopen(origin + "/", timeout=10) as response:
+                if "text/html" not in response.headers.get("Content-Type", "") or not response.headers.get("Strict-Transport-Security"):
+                    raise RuntimeError("Public UI or TLS headers failed verification")
+            for path, expected_status in (("/docs", 404), ("/openapi.json", 404), ("/api/v1/reports", 401)):
+                try:
+                    with urlopen(origin + path, timeout=10):
+                        raise RuntimeError("Public access boundary failed verification")
+                except HTTPError as error:
+                    if error.code != expected_status:
+                        raise RuntimeError("Public access boundary failed verification") from None
+            authenticated = Request(origin + "/api/v1/capabilities", headers={"Authorization": "Bearer " + environment["OPERATOR_TOKEN"]})
+            with urlopen(authenticated, timeout=10) as response:
+                if json.loads(response.read(16384)).get("production_ready") is not False:
+                    raise RuntimeError("Public authenticated capability verification failed")
             print("Public HTTPS readiness verified")
     except Exception:
         if previous_image and (app_directory / "current").is_symlink():
