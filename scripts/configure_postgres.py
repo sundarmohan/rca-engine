@@ -1,9 +1,14 @@
 from datetime import datetime, timezone
+import base64
+import hashlib
+import hmac
+import json
 import os
 from pathlib import Path
 import shutil
 import stat
 import subprocess
+import sys
 import tempfile
 
 
@@ -16,13 +21,33 @@ def configured_hba(contents):
 
 
 def query(statement, database="postgres"):
-    result = subprocess.run(["psql", "-X", "-v", "ON_ERROR_STOP=1", "-tAc", statement, "-d", database], check=True, capture_output=True, text=True)
+    result = subprocess.run(["psql", "-X", "-v", "ON_ERROR_STOP=1", "-tA", "-d", database], input=statement + ";\n", check=True, capture_output=True, text=True)
     return result.stdout.strip()
+
+
+def password_verifier(password):
+    if not password or not password.isascii() or "\x00" in password:
+        raise SystemExit("Automatic development password alignment requires a nonempty ASCII password; configure other passwords directly in PostgreSQL")
+    salt = os.urandom(16)
+    salted = hashlib.pbkdf2_hmac("sha256", password.encode(), salt, 4096)
+    client = hmac.digest(salted, b"Client Key", "sha256")
+    stored = hashlib.sha256(client).digest()
+    server = hmac.digest(salted, b"Server Key", "sha256")
+    encoded_salt = base64.b64encode(salt).decode("ascii")
+    encoded_stored = base64.b64encode(stored).decode("ascii")
+    encoded_server = base64.b64encode(server).decode("ascii")
+    return f"SCRAM-SHA-256$4096:{encoded_salt}${encoded_stored}:{encoded_server}"
 
 
 def main():
     if query("SELECT current_user") != "postgres":
         raise SystemExit("Local database setup must run as the PostgreSQL administrator")
+    if "--sync-password" in sys.argv:
+        password = json.load(sys.stdin)["password"]
+        verifier = password_verifier(password)
+        query("SET log_statement = 'none'; SET log_min_error_statement = 'panic'; SET log_min_duration_statement = -1; ALTER ROLE rca_engine_user PASSWORD '" + verifier + "'")
+        print("Aligned only the dedicated development database user password using a SCRAM verifier; plaintext was not sent to SQL or logs")
+        return
     hba = Path(query("SHOW hba_file")).resolve()
     contents = hba.read_text()
     updated = configured_hba(contents)

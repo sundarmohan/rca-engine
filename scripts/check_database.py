@@ -12,6 +12,9 @@ def main():
         if "ident authentication failed" in message or "no pg_hba.conf entry" in message:
             print("Local PostgreSQL authentication needs an app-specific password rule")
             raise SystemExit(42) from None
+        if "password authentication failed" in message:
+            print("The dedicated PostgreSQL user password does not match the configured development secret")
+            raise SystemExit(43) from None
         print("PostgreSQL connection failed; check the configured password, server status and database")
         raise SystemExit(1) from None
     print("Local PostgreSQL connection verified")

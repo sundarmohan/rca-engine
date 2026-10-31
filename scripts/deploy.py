@@ -5,6 +5,7 @@ import re
 import subprocess
 import sys
 import time
+from urllib.parse import unquote, urlsplit
 
 
 def main():
@@ -29,11 +30,15 @@ def main():
     test_environment["TEST_DATABASE_URL"] = environment["DATABASE_URL"]
     test_container = ["docker", "run", "--rm", "--network", "host", "--read-only", "--tmpfs", "/tmp", "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true", "-e", "TEST_DATABASE_URL", image, "python", "-m"]
     database_check = subprocess.run(test_container + ["scripts.check_database"], env=test_environment, cwd=release)
+    setup_script = (release / "scripts/configure_postgres.py").read_text(encoding="utf-8")
     if database_check.returncode == 42:
-        setup_script = (release / "scripts/configure_postgres.py").read_text(encoding="utf-8")
         subprocess.run(["sudo", "-n", "-u", "postgres", "python3", "-"], input=setup_script, text=True, cwd="/tmp", check=True)
-        subprocess.run(test_container + ["scripts.check_database"], env=test_environment, cwd=release, check=True)
-    elif database_check.returncode != 0:
+        database_check = subprocess.run(test_container + ["scripts.check_database"], env=test_environment, cwd=release)
+    if database_check.returncode == 43 and environment.get("APP_ENV") == "development":
+        password = unquote(urlsplit(environment["DATABASE_URL"]).password)
+        subprocess.run(["sudo", "-n", "-u", "postgres", "python3", "-c", setup_script, "--sync-password"], input=json.dumps({"password": password}), text=True, cwd="/tmp", check=True)
+        database_check = subprocess.run(test_container + ["scripts.check_database"], env=test_environment, cwd=release)
+    if database_check.returncode != 0:
         raise SystemExit("Database connection preflight failed; running application was not changed")
     subprocess.run(test_container + ["pytest", "-q", "-p", "no:cacheprovider"], env=test_environment, cwd=release, check=True)
     result = subprocess.run(["docker", "inspect", "--format", "{{.Config.Image}}", "multicloud-rca-engine"], capture_output=True, text=True)

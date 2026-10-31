@@ -3,7 +3,7 @@ from urllib.parse import unquote, urlsplit
 import pytest
 
 from scripts.render_runtime import normalize_database_url
-from scripts.configure_postgres import APP_RULE, configured_hba
+from scripts.configure_postgres import APP_RULE, configured_hba, password_verifier
 
 
 @pytest.mark.parametrize("password", ["Dev[p@ss]#word/?:+", "Dev%word", "Dev word", "dev:pass"])
@@ -36,3 +36,11 @@ def test_postgres_rule_is_scoped_idempotent_and_preserves_other_rules():
     updated = configured_hba(original)
     assert updated == APP_RULE + "\n" + original
     assert configured_hba(updated) == updated
+
+
+def test_development_password_verifier_uses_salted_scram_without_plaintext():
+    password = "Dev[p@ss]#word"
+    verifier = password_verifier(password)
+    assert verifier.startswith("SCRAM-SHA-256$4096:")
+    assert password not in verifier
+    assert password_verifier(password) != verifier

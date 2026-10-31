@@ -67,6 +67,8 @@ The [deployment workflow](./.github/workflows/deploy-ec2.yml) runs on pushes to 
 
 The single-container rollout has brief downtime. Reports survive application restarts when PostgreSQL is configured. Secrets are retained with release files for rollback; protect the application directory and remove obsolete releases according to your secret/backup policy. Schema test failures stop the deployment before replacing the running application.
 
+For this user-authorized development bootstrap only (`APP_ENV=development`), a password-authentication mismatch aligns the dedicated `rca_engine_user` password with the configured `DATABASE_URL`. The password stays in memory/stdin and is converted to a salted SCRAM verifier before being sent to PostgreSQL; SQL statement logging is disabled for this administrative session. No other role is modified, and automatic alignment is disabled outside development. Automatic alignment supports ASCII passwords; configure Unicode passwords directly in PostgreSQL. The GitHub secret itself is never read back or overwritten.
+
 ## Access and verification
 
 For the default loopback binding, run locally (replace the placeholders):
