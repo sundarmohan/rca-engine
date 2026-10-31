@@ -1,0 +1,29 @@
+# EC2 deployment and recovery
+
+Deployed support release: commit `19d7fc4`, successful [EC2 run 41198858245](https://github.com/sundarmohan/rca-engine/actions/runs/41198858245), 344 passed, 2 warnings in 1.49 seconds (fake providers, PostgreSQL and approval/API tests). Smoke checks passed for assistance without live calls, CAS report revisions and public TLS at [rca.genixtec.com](https://rca.genixtec.com). Live Azure/AWS identities and secrets remain absent; no live authorization is validated. Latest deployed follow-up `be067fb`, [run 41198923970](https://github.com/sundarmohan/rca-engine/actions/runs/41198923970), succeeded: 344 passed, 2 warnings in 1.39 seconds. Public authenticated capabilities reported `production_ready=false`; UI/HSTS with trusted TLS, public docs 404 and unauthenticated reports 401 probes all passed. See the updated [deployment status](./DEVELOPMENT_STATUS.md) for latest evidence. No production-ready or phase-complete claim is made.
+
+## Prerequisites and protected configuration
+
+Use the existing [deployment guide](../DEPLOY_EC2.md) for detailed settings and the [workflow](../.github/workflows/deploy-ec2.yml) as the executable contract. An authorized administrator supplies Linux EC2, Python 3, Docker/Compose v2, a dedicated writable application directory and restricted SSH access. Docker-group membership is root-equivalent host administration, separate from the application's cloud read-only identities.
+
+Keep host PostgreSQL 17 private at `127.0.0.1:5432`. The dedicated application role needs database connect/schema creation plus isolated test-schema privileges, not superuser access. Linux host networking reaches loopback PostgreSQL without exposing its port. Store `EC2_HOST`, `EC2_USER`, `EC2_SSH_PRIVATE_KEY`, `EC2_APP_DIR`, preferably pinned `EC2_KNOWN_HOSTS`, `DATABASE_URL`, distinct random ≥32-character operator/webhook tokens, optional SMTP and explicitly enabled provider settings in protected GitHub Dev secrets. See [Azure](./PROVIDER_SETUP_AZURE.md) and [AWS](./PROVIDER_SETUP_AWS.md).
+
+Dev variables: `RCA_PUBLIC_DOMAIN=rca.genixtec.com`, certificate contact `RCA_TLS_EMAIL`, `APP_BIND_HOST=127.0.0.1`; deployed mode remains development. DNS must point to EC2 and intended inbound TCP 80/443 must be allowed. Restrict SSH to approved management sources; keep 8000, 5432 and Caddy administration private. Secret values never belong in URLs or diagnostic output.
+
+## Release flow
+
+1. The workflow builds/transfers the image for the triggering SHA and renders restricted runtime configuration. Documentation-only paths do not trigger its push deployment filter; this documentation task does not deploy anything.
+2. [Release orchestration](../scripts/deploy.py) stages `releases/<SHA>` and runs the test container on EC2, including actual PostgreSQL integration tests in isolated schemas and fake provider tests. Tests do not run locally/on the build runner or query live clouds by default.
+3. Startup performs additive, transactional schema version 1 initialization for compact report storage. Existing approved development bootstrap can adjust narrowly scoped PostgreSQL authentication/schema privileges and align the dedicated role's password on mismatch; password alignment is disabled outside development. See [database setup implementation](../scripts/configure_postgres.py).
+4. Recreate the application using [composition](../compose.yaml): non-root image, read-only filesystem, dropped capabilities and bounded temporary/log storage. Validate readiness and [smoke checks](../scripts/smoke_test.py) for UI/API/authentication/report persistence; synthetic reports are removed and mail is not sent.
+5. Validate/recreate the separate [Caddy project](../compose.ingress.yaml) and verify public HTTPS readiness with certificate verification before recording the `current` release. Preserve project-owned certificate volumes and [Caddy configuration](../deploy/Caddyfile).
+
+Inspect release/test/smoke evidence before accepting an update. Readiness is storage/configuration evidence, not live provider authorization, SMTP receipt or production acceptance. Authorized staging operators must separately validate scoped read-only access and mailbox delivery.
+
+## Rollback and host access
+
+Failed managed rollout/smoke checks attempt restoration of prior managed app/runtime and ingress configuration; failed first exposure stops the newly started ingress. Unmanaged prior containers cannot be fully restored. Additive database migrations are not rolled back; single-container rollout has brief downtime. Consult [orchestration](../scripts/deploy.py) before an authorized manual recovery and validate the restored release's readiness/HTTPS. Retain necessary rollback files securely: runtime configuration contains secrets. Removing domain variables alone does not stop existing ingress; an authorized administrator must explicitly withdraw it. Preserve certificate volumes.
+
+Manual SSH is for explicitly authorized host administrators, never an application UI diagnostic. A loopback SSH tunnel can expose development API docs privately; public Caddy blocks `/docs`, `/redoc` and `/openapi.json`. Inspect container/database/ingress health without printing runtime secrets, bearer tokens or report payloads. Protect release directories and apply intentional cleanup/backup expiry; application report TTL does not erase PostgreSQL WAL or external logs.
+
+Support proposals/approvals are development/test only and transient; authenticated production routes return 503 until independent identities/RBAC exist. Deep metrics/log/audit queries, native events, scheduler/coverage audits, OIDC, reliable mail and HA remain unsupported. See [operations](./OPERATIONS.md), [retention](./RETENTION_AND_PRIVACY.md) and the still-open [production gates](./PRODUCTION_READINESS.md), whose older deployment snapshot does not supersede the verified baseline above.
