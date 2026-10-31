@@ -23,11 +23,19 @@ def main():
             credentials = parsed.netloc.rsplit("@", 1)[0]
             parsed = parsed._replace(netloc=f"{credentials}@127.0.0.1:5432")
             values["DATABASE_URL"] = urlunsplit(parsed)
-        valid = parsed.scheme in {"postgresql", "postgres"} and parsed.hostname in {"127.0.0.1", "localhost"} and parsed.path == "/rca_engine_db" and parsed.port in {None, 5432} and parsed.username == "rca_engine_user" and bool(parsed.password)
+        checks = {
+            "scheme (use postgresql://)": parsed.scheme in {"postgresql", "postgres"},
+            "host (use 127.0.0.1)": parsed.hostname in {"127.0.0.1", "localhost"},
+            "database (use rca_engine_db)": parsed.path == "/rca_engine_db",
+            "port (use 5432)": parsed.port in {None, 5432},
+            "username (use rca_engine_user)": parsed.username == "rca_engine_user",
+            "password (provide a URL-encoded password)": bool(parsed.password),
+        }
     except ValueError:
-        valid = False
-    if not valid:
-        raise SystemExit("DATABASE_URL must target localhost:5432/rca_engine_db for this host-network deployment")
+        raise SystemExit("DATABASE_URL cannot be parsed; URL-encode password special characters and use port 5432") from None
+    invalid = [name for name, valid in checks.items() if not valid]
+    if invalid:
+        raise SystemExit("Invalid DATABASE_URL fields: " + "; ".join(invalid))
     for name in ("CACHE_TTL_SECONDS", "CACHE_MAX_ITEMS", "SMTP_PORT"):
         if not values[name].isdigit() or int(values[name]) < 1:
             raise SystemExit(f"Invalid positive integer: {name}")
