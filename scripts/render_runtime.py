@@ -2,7 +2,7 @@ import json
 import os
 from pathlib import Path
 import re
-from urllib.parse import quote, urlsplit, urlunsplit
+from urllib.parse import quote, unquote, urlsplit, urlunsplit
 
 
 def normalize_database_url(value):
@@ -52,6 +52,10 @@ def main():
     invalid = [name for name, valid in checks.items() if not valid]
     if invalid:
         raise SystemExit("Invalid DATABASE_URL fields: " + "; ".join(invalid))
+    if os.getenv("GITHUB_ACTIONS") == "true":
+        for sensitive in (values["DATABASE_URL"], parsed.password, unquote(parsed.password)):
+            escaped = sensitive.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+            print("::add-mask::" + escaped)
     for name in ("CACHE_TTL_SECONDS", "CACHE_MAX_ITEMS", "SMTP_PORT"):
         if not values[name].isdigit() or int(values[name]) < 1:
             raise SystemExit(f"Invalid positive integer: {name}")
