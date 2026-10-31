@@ -26,7 +26,7 @@ Create these under GitHub repository Settings → Environments → **Dev** → S
 | `SMTP_PORT`, `EMAIL_STARTTLS` | `587`, `true` if absent |
 | `EC2_KNOWN_HOSTS` | Optional verified OpenSSH known-hosts entry to pin the server identity; otherwise first-use `ssh-keyscan` is used |
 
-Keep passwords and private keys out of chat and version control. URL-encode special password characters. SSL is not required for this loopback connection. If your existing secret uses the previously suggested `host.docker.internal` alias, runtime rendering converts it to `127.0.0.1:5432` for host networking without changing the GitHub secret.
+Keep passwords and private keys out of chat and version control. URL-encode special password characters. For this exact local database/user, runtime rendering also safely encodes raw password punctuation, preserves existing percent escapes, and removes an optional `DATABASE_URL=` prefix and surrounding quotes. A literal percent followed by two hexadecimal digits must be encoded as `%25` to distinguish it from an existing escape. SSL is not required for this loopback connection. If your existing secret uses the previously suggested `host.docker.internal` alias, runtime rendering converts it to `127.0.0.1:5432` for host networking without changing the GitHub secret.
 
 An optional **Dev environment variable** (not a secret), `APP_BIND_HOST`, controls web exposure. The default `127.0.0.1` supports an SSH tunnel or an existing HTTPS reverse proxy. For direct access in a restricted Dev security group, set `APP_BIND_HOST=0.0.0.0` and allow port 8000 only from your client IP. Use HTTPS before sending credentials over an external network.
 

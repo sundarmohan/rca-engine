@@ -8,6 +8,7 @@ COPY app ./app
 COPY tests ./tests
 COPY pytest.ini ./pytest.ini
 COPY scripts/smoke_test.py ./scripts/smoke_test.py
+COPY scripts/render_runtime.py ./scripts/render_runtime.py
 USER appuser
 EXPOSE 8000
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

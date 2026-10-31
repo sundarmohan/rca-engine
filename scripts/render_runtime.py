@@ -1,7 +1,22 @@
 import json
 import os
 from pathlib import Path
-from urllib.parse import urlsplit, urlunsplit
+import re
+from urllib.parse import quote, urlsplit, urlunsplit
+
+
+def normalize_database_url(value):
+    value = value.strip()
+    if value.startswith("DATABASE_URL="):
+        value = value.removeprefix("DATABASE_URL=").strip()
+    if len(value) >= 2 and value[0] in {"'", '"', "`"} and value[-1] == value[0]:
+        value = value[1:-1]
+    match = re.fullmatch(r"(postgres(?:ql)?://rca_engine_user:)(.*)@(127\.0\.0\.1|localhost|host\.docker\.internal)(?::5432)?(/rca_engine_db(?:\?[^\s#]*)?)", value, flags=re.DOTALL)
+    if match:
+        password = quote(match.group(2), safe="%")
+        password = re.sub(r"%(?![0-9a-fA-F]{2})", "%25", password)
+        value = f"{match.group(1)}{password}@127.0.0.1:5432{match.group(4)}"
+    return value
 
 
 def main():
@@ -18,6 +33,7 @@ def main():
     if len(values["WEBHOOK_TOKEN"]) < 32 or values["WEBHOOK_TOKEN"] == "replace-with-a-long-random-secret":
         raise SystemExit("WEBHOOK_TOKEN must be a random secret of at least 32 characters")
     try:
+        values["DATABASE_URL"] = normalize_database_url(values["DATABASE_URL"])
         parsed = urlsplit(values["DATABASE_URL"])
         if parsed.hostname == "host.docker.internal":
             credentials = parsed.netloc.rsplit("@", 1)[0]
