@@ -30,7 +30,8 @@ def main():
     test_container = ["docker", "run", "--rm", "--network", "host", "--read-only", "--tmpfs", "/tmp", "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true", "-e", "TEST_DATABASE_URL", image, "python", "-m"]
     database_check = subprocess.run(test_container + ["scripts.check_database"], env=test_environment, cwd=release)
     if database_check.returncode == 42:
-        run(["sudo", "-n", "-u", "postgres", "python3", str(release / "scripts/configure_postgres.py")])
+        setup_script = (release / "scripts/configure_postgres.py").read_text(encoding="utf-8")
+        subprocess.run(["sudo", "-n", "-u", "postgres", "python3", "-"], input=setup_script, text=True, cwd="/tmp", check=True)
         subprocess.run(test_container + ["scripts.check_database"], env=test_environment, cwd=release, check=True)
     elif database_check.returncode != 0:
         raise SystemExit("Database connection preflight failed; running application was not changed")
