@@ -96,7 +96,11 @@ jobs:
           ssh "${SSH_OPTS[@]}" "${EC2_USER}@${EC2_HOST}" bash -s -- "$APP_DIR" "$GITHUB_SHA" <<'REMOTE'
           set -euo pipefail
           command -v python3 >/dev/null
-          docker info >/dev/null
+          if ! docker info >/dev/null 2>&1; then
+            sudo -n docker info >/dev/null || { echo 'Docker access requires an administrator: grant the deployment user Docker access or noninteractive sudo.'; exit 1; }
+            sudo -n usermod -aG docker "$(id -un)"
+            echo 'Granted the deployment user root-equivalent Docker group access using existing sudo; subsequent SSH sessions activate membership.'
+          fi
           docker compose version >/dev/null
           app_dir="$1"
           if [ ! -d "$app_dir" ]; then

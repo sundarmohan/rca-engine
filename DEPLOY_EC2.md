@@ -32,7 +32,7 @@ An optional **Dev environment variable** (not a secret), `APP_BIND_HOST`, contro
 
 ## EC2 prerequisites
 
-- Docker Engine and a Compose v2 plugin (`docker compose version`); the SSH user must have access to `docker info`.
+- Docker Engine and a Compose v2 plugin (`docker compose version`); the SSH user must have access to `docker info`. If access is missing but noninteractive sudo is already available, deployment adds this authorized user to the root-equivalent `docker` group; the next SSH session activates membership. The Docker socket is never made world-writable.
 - Python 3 on the host for release orchestration.
 - SSH reachable from the Actions runner. Hosted runner IPs vary; restricted networks may require a self-hosted runner inside your network.
 - A writable dedicated `EC2_APP_DIR`. If absent, the workflow uses noninteractive sudo once to create it, owned by the SSH user.
