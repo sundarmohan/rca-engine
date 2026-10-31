@@ -68,8 +68,8 @@ jobs:
           AWS_ACCOUNT_IDS: ${{ secrets.AWS_ACCOUNT_IDS }}
           AWS_REGIONS: ${{ secrets.AWS_REGIONS }}
           AWS_INSTANCE_IDS: ${{ secrets.AWS_INSTANCE_IDS }}
-          RCA_PUBLIC_DOMAIN: ${{ vars.RCA_PUBLIC_DOMAIN }}
-          RCA_TLS_EMAIL: ${{ vars.RCA_TLS_EMAIL }}
+          RCA_PUBLIC_DOMAIN: ${{ vars.RCA_PUBLIC_DOMAIN || secrets.RCA_PUBLIC_DOMAIN }}
+          RCA_TLS_EMAIL: ${{ vars.RCA_TLS_EMAIL || secrets.RCA_TLS_EMAIL }}
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           CACHE_TTL_SECONDS: ${{ secrets.CACHE_TTL_SECONDS }}
           CACHE_MAX_ITEMS: ${{ secrets.CACHE_MAX_ITEMS }}

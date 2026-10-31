@@ -31,6 +31,8 @@ Keep passwords and private keys out of chat and version control. URL-encode spec
 
 The optional **Dev environment variable** (not a secret), `APP_BIND_HOST`, defaults to `127.0.0.1` for an SSH tunnel or HTTPS reverse proxy. Do not expose port 8000 publicly. To enable the provided HTTPS ingress, add **Dev environment variables** `RCA_PUBLIC_DOMAIN` (DNS hostname only) and `RCA_TLS_EMAIL` (certificate contact), plus the distinct `OPERATOR_TOKEN` secret. Point the domain's DNS A record at the EC2 public address and allow inbound TCP 80/443. The renderer forces loopback binding with HTTPS enabled. Keep PostgreSQL 5432 private and restrict SSH to approved sources. Domain values are variables, not secrets.
 
+The workflow also accepts `RCA_PUBLIC_DOMAIN` and `RCA_TLS_EMAIL` as Dev secrets for compatibility; a same-name environment variable takes precedence. Use `rca.genixtec.com` as the configured hostname, without a scheme or path.
+
 For cloud identities and the complete additional secrets table, see [CLOUD_SETUP.md](./docs/CLOUD_SETUP.md). Providers default to disabled when their flags are absent. No AWS access keys are required for application deployment; use a dedicated EC2 instance role for AWS diagnostics. Installing Docker does not attach that role or validate its permissions.
 
 ## EC2 prerequisites
