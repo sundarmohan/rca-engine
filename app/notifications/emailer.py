@@ -17,7 +17,8 @@ def send_report(report: RCAReport) -> None:
     if not all(required):
         raise EmailNotConfigured("SMTP_HOST, EMAIL_FROM and EMAIL_TO must be configured")
     msg = EmailMessage()
-    msg["Subject"] = f"[{report.severity.upper()}] RCA: {report.resource_id}"
+    subject = f"[{report.severity.upper()}] RCA: {report.resource_id}"
+    msg["Subject"] = " ".join(subject.splitlines())[:256]
     msg["From"] = settings.email_from
     msg["To"] = settings.email_to
     msg.set_content(report.model_dump_json(indent=2))

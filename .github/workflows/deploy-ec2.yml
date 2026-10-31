@@ -11,6 +11,8 @@ on:
       - requirements.txt
       - Dockerfile
       - compose.yaml
+      - compose.ingress.yaml
+      - deploy/**
       - pytest.ini
       - .github/workflows/deploy-ec2.yml
 
@@ -55,6 +57,19 @@ jobs:
           APP_ENV: ${{ secrets.APP_ENV || 'development' }}
           APP_BIND_HOST: ${{ vars.APP_BIND_HOST || '127.0.0.1' }}
           WEBHOOK_TOKEN: ${{ secrets.WEBHOOK_TOKEN }}
+          OPERATOR_TOKEN: ${{ secrets.OPERATOR_TOKEN }}
+          AZURE_ENABLED: ${{ secrets.AZURE_ENABLED }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          AZURE_SUBSCRIPTION_IDS: ${{ secrets.AZURE_SUBSCRIPTION_IDS }}
+          AZURE_RESOURCE_GROUPS: ${{ secrets.AZURE_RESOURCE_GROUPS }}
+          AWS_ENABLED: ${{ secrets.AWS_ENABLED }}
+          AWS_ACCOUNT_IDS: ${{ secrets.AWS_ACCOUNT_IDS }}
+          AWS_REGIONS: ${{ secrets.AWS_REGIONS }}
+          AWS_INSTANCE_IDS: ${{ secrets.AWS_INSTANCE_IDS }}
+          RCA_PUBLIC_DOMAIN: ${{ vars.RCA_PUBLIC_DOMAIN }}
+          RCA_TLS_EMAIL: ${{ vars.RCA_TLS_EMAIL }}
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           CACHE_TTL_SECONDS: ${{ secrets.CACHE_TTL_SECONDS }}
           CACHE_MAX_ITEMS: ${{ secrets.CACHE_MAX_ITEMS }}
@@ -110,7 +125,7 @@ jobs:
           mkdir -p "$app_dir/releases/$2"
           chmod 700 "$app_dir/releases/$2"
           REMOTE
-          tar -czf release.tar.gz compose.yaml scripts runtime.json
+          tar -czf release.tar.gz compose.yaml compose.ingress.yaml deploy scripts runtime.json
           scp "${SSH_OPTS[@]}" image.tar.gz release.tar.gz "${EC2_USER}@${EC2_HOST}:${APP_DIR}/releases/${GITHUB_SHA}/"
           ssh "${SSH_OPTS[@]}" "${EC2_USER}@${EC2_HOST}" bash -s -- "$APP_DIR" "$GITHUB_SHA" <<'REMOTE'
           set -euo pipefail

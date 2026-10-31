@@ -4,7 +4,7 @@
 
 The image serves the dashboard at `/`, the FastAPI documentation at `/docs`, and authenticated incident APIs at `/api/v1`. PostgreSQL 17 remains installed on the host. Linux host networking makes `127.0.0.1:5432` reachable inside the application container; no PostgreSQL listener or security-group change is necessary.
 
-Live Azure/AWS discovery, monitoring, diagnostic query adapters, mature RCA rules and human query-approval workflows remain unimplemented. Reports explicitly identify these evidence gaps. This deployment does not upgrade PostgreSQL, change cloud IAM, or perform remediation.
+The new release adds explicitly enabled Azure VM discovery/current instance-view health and AWS EC2 discovery/current instance/system checks. Deep metrics/log/audit queries, continuous monitoring, mature RCA rules and human query-approval workflows remain unimplemented. Cloud health reports explicitly identify evidence gaps and leave root cause undetermined. This deployment does not upgrade PostgreSQL, change cloud IAM, or perform remediation. See [cloud setup](./docs/CLOUD_SETUP.md) and [production readiness](./docs/PRODUCTION_READINESS.md).
 
 ## Dev environment configuration
 
@@ -18,6 +18,7 @@ Create these under GitHub repository Settings → Environments → **Dev** → S
 | `EC2_APP_DIR` | Dedicated application directory, e.g. `/opt/rca-engine` |
 | `DATABASE_URL` | `postgresql://rca_engine_user:URL_ENCODED_PASSWORD@127.0.0.1:5432/rca_engine_db` |
 | `WEBHOOK_TOKEN` | Random secret, at least 32 characters; required even in Dev deployments |
+| `OPERATOR_TOKEN` | Separate random secret, at least 32 characters; required for public HTTPS and production. Use for UI/report/cloud controls, not provider webhooks |
 | `APP_ENV` | `development` |
 | `CACHE_TTL_SECONDS` | `86400` if absent |
 | `CACHE_MAX_ITEMS` | `1000` if absent |
@@ -28,7 +29,9 @@ Create these under GitHub repository Settings → Environments → **Dev** → S
 
 Keep passwords and private keys out of chat and version control. URL-encode special password characters. For this exact local database/user, runtime rendering also safely encodes raw password punctuation, preserves existing percent escapes, and removes an optional `DATABASE_URL=` prefix and surrounding quotes. A literal percent followed by two hexadecimal digits must be encoded as `%25` to distinguish it from an existing escape. SSL is not required for this loopback connection. If your existing secret uses the previously suggested `host.docker.internal` alias, runtime rendering converts it to `127.0.0.1:5432` for host networking without changing the GitHub secret.
 
-An optional **Dev environment variable** (not a secret), `APP_BIND_HOST`, controls web exposure. The default `127.0.0.1` supports an SSH tunnel or an existing HTTPS reverse proxy. For direct access in a restricted Dev security group, set `APP_BIND_HOST=0.0.0.0` and allow port 8000 only from your client IP. Use HTTPS before sending credentials over an external network.
+The optional **Dev environment variable** (not a secret), `APP_BIND_HOST`, defaults to `127.0.0.1` for an SSH tunnel or HTTPS reverse proxy. Do not expose port 8000 publicly. To enable the provided HTTPS ingress, add **Dev environment variables** `RCA_PUBLIC_DOMAIN` (DNS hostname only) and `RCA_TLS_EMAIL` (certificate contact), plus the distinct `OPERATOR_TOKEN` secret. Point the domain's DNS A record at the EC2 public address and allow inbound TCP 80/443. The renderer forces loopback binding with HTTPS enabled. Keep PostgreSQL 5432 private and restrict SSH to approved sources. Domain values are variables, not secrets.
+
+For cloud identities and the complete additional secrets table, see [CLOUD_SETUP.md](./docs/CLOUD_SETUP.md). Providers default to disabled when their flags are absent. No AWS access keys are required for application deployment; use a dedicated EC2 instance role for AWS diagnostics. Installing Docker does not attach that role or validate its permissions.
 
 ## EC2 prerequisites
 
@@ -65,6 +68,8 @@ The [deployment workflow](./.github/workflows/deploy-ec2.yml) runs on pushes to 
 6. Wait for API/database readiness, then verify UI assets, API schema, authentication, event ingestion, deduplication and database persistence. Synthetic smoke reports are deleted afterward. SMTP messages are not sent by deployment tests.
 7. Record the successful release with a `current` symlink. If rollout or smoke checks fail, restore the prior managed image and its runtime configuration when one exists. Existing unmanaged containers cannot be fully restored by this release mechanism. Additive database migrations are not rolled back.
 
+When HTTPS is configured, the workflow validates and recreates Caddy in the separate `rca-ingress` Compose project and checks publicly named HTTPS readiness with certificate verification before recording success. A failed first exposure stops the new ingress; a failed managed upgrade restores prior app/ingress configuration when available. Certificate volumes are retained. Removing the domain configuration does not automatically withdraw an already-running proxy: stop `rca-ingress` explicitly before withdrawing exposure. HTTPS does not make the development application production ready.
+
 The single-container rollout has brief downtime. Reports survive application restarts when PostgreSQL is configured. Secrets are retained with release files for rollback; protect the application directory and remove obsolete releases according to your secret/backup policy. Schema test failures stop the deployment before replacing the running application.
 
 For this user-authorized development bootstrap only (`APP_ENV=development`), a password-authentication mismatch aligns the dedicated `rca_engine_user` password with the configured `DATABASE_URL`. The password stays in memory/stdin and is converted to a salted SCRAM verifier before being sent to PostgreSQL; SQL statement logging is disabled for this administrative session. No other role is modified, and automatic alignment is disabled outside development. Automatic alignment supports ASCII passwords; configure Unicode passwords directly in PostgreSQL. The GitHub secret itself is never read back or overwritten.
@@ -84,7 +89,9 @@ Then open:
 - Liveness: `http://127.0.0.1:8000/health`
 - Readiness: `http://127.0.0.1:8000/ready` (must show `storage: postgresql`)
 
-Enter the webhook token in the dashboard to access reports. It is held only in browser memory, not local storage. For Swagger, send `Authorization: Bearer <WEBHOOK_TOKEN>` on protected API calls; health, readiness and static UI assets are public.
+With ingress configured, use `https://YOUR_DOMAIN/` for the UI and `/api/v1` for the API. Public `/docs`, `/redoc` and `/openapi.json` are blocked by Caddy; use the SSH tunnel in development for documentation.
+
+Enter `OPERATOR_TOKEN` in the dashboard to access reports and cloud controls. It is held only in browser memory, not local storage. Development without an operator token falls back to the webhook token. Event intake always uses `WEBHOOK_TOKEN` separately; the synthetic event form accepts it without changing the operator session. Health, readiness and static UI assets are public. SMTP tests do not send mail automatically; receipt at the intended mailbox still needs verification.
 
 On EC2, view container state without printing runtime configuration:
 

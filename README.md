@@ -2,7 +2,7 @@
 
 API and operator dashboard for a deterministic, read-only incident investigation service for Azure and AWS.
 
-## Current status: UI/API platform; live cloud diagnostics pending
+## Current status: bounded VM cloud slice; production approval pending
 
 Implemented now:
 - FastAPI service with health/readiness endpoints.
@@ -16,16 +16,20 @@ Implemented now:
 - Docker image running as a non-root user with a read-only root filesystem in Compose.
 - Basic API tests.
 - GitHub Actions image build and EC2 deployment using the `Dev` environment. API and PostgreSQL tests execute on EC2 before rollout, followed by deployed UI/API smoke checks.
+- Explicitly enabled Azure VM inventory/instance-view health and AWS EC2 inventory/instance/system checks, behind bounded provider adapters and an authenticated cloud workspace.
+- Separate operator/webhook credentials, fail-closed production startup, 64 KiB API bodies, single-process global rate limits and two concurrent cloud operations.
+- Optional Caddy HTTPS ingress when a domain, TLS contact and distinct operator token are configured. Application and PostgreSQL remain on loopback.
 
 Not implemented yet:
-- Live Azure/AWS credentials, discovery and resource inventory.
+- Live staging identity, effective read-only permissions and telemetry validation. AWS cross-account role assumption is unsupported.
 - Azure Monitor/Log Analytics KQL and AWS CloudWatch Logs Insights queries.
 - Provider event subscription setup, alert rules, scheduled health checks or coverage checks.
 - Resource-specific dependency correlation and mature RCA rule packs.
 - Production identity validation, secret management and hardened webhook auth integration.
 - Email provider integration beyond SMTP.
+- OIDC/RBAC, typed query proposals with approval/revision/expiry, assistance workflows, automatic email retries, backup/restore verification and production security sign-off.
 
-Do not connect this scaffold to production until the remaining controls and provider adapters are implemented and reviewed.
+Current cloud checks collect platform observations, not historical root causes. Review [cloud setup](./docs/CLOUD_SETUP.md) and the [production no-go checklist](./docs/PRODUCTION_READINESS.md) before enabling any production scope. No tests are run locally or on the build runner by the deployment workflow.
 
 ## Local run
 
@@ -41,7 +45,7 @@ uvicorn app.main:app --reload
 ```
 
 Open `http://127.0.0.1:8000/docs` for the interactive API documentation.
-Open `http://127.0.0.1:8000/` for the dashboard. Enter your configured webhook token to access reports.
+Open `http://127.0.0.1:8000/` for the dashboard. Enter `OPERATOR_TOKEN` for reports/cloud controls; development falls back to `WEBHOOK_TOKEN` when no operator token is configured. Event intake uses `WEBHOOK_TOKEN` separately.
 
 ## Test
 
@@ -66,14 +70,15 @@ With `APP_ENV=development`, the webhook token is optional for local testing. In 
 ```bash
 curl -X POST http://127.0.0.1:8000/api/v1/events \
   -H 'Content-Type: application/json' \
+  -H 'Authorization: Bearer YOUR_WEBHOOK_TOKEN' \
   -d '{"provider":"azure","event_type":"availability-alert","resource_id":"demo-resource","resource_type":"Microsoft.Web/sites","severity":"critical","summary":"Demo availability alert"}'
 ```
 
-This produces a starter report only. It does not query Azure/AWS yet, so the root cause will remain undetermined pending provider adapters.
+This normalized event path produces a starter report only and does not automatically query providers. Use the cloud workspace to explicitly verify, discover and collect current VM platform health; its reports still leave root cause undetermined.
 
 ## Safety and retention
 
-- No cloud SDK adapters currently make cloud calls.
+- Cloud SDK calls occur only through explicitly enabled adapters and operator-triggered actions; startup/readiness do not query cloud APIs.
 - No endpoint performs remediation or infrastructure writes.
 - Do not accept arbitrary commands or query strings from alerts.
 - Without `DATABASE_URL`, reports use bounded process memory and are lost on restart. With `DATABASE_URL`, compact reports persist in PostgreSQL across restarts; default TTL is 24 hours with cleanup every 60 seconds and on reads/writes, bounded to 1,000 reports. Replaying the same normalized event with a stable `occurred_at` reuses its report until expiry.

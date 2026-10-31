@@ -1,0 +1,68 @@
+# Security boundaries and read-only operation
+
+**Public production use is not approved by this configuration.** The current app has a public UI and bearer-token APIs. The deployment baseline uses a shared token; concurrent source edits add separate operator/webhook tokens and initial VM diagnostics, unvalidated by this task. HTTPS does not provide human identity, RBAC, provider authenticity, approval policy or complete multi-cloud investigation. The complete open-gate/evidence list and EC2 operator procedure are in [PRODUCTION_READINESS.md](./PRODUCTION_READINESS.md).
+
+## Authoritative scope and PostgreSQL exception
+
+[PROJECT_OBJECTIVE.md](../PROJECT_OBJECTIVE.md) defines a deterministic, bounded, diagnostic-only engine. The user explicitly requested PostgreSQL report persistence after the original no-database baseline, as recorded in [DEPLOY_EC2.md](../DEPLOY_EC2.md). This exception allows the existing local application's report tables/indexes, inserts and TTL/count deletions; it does not authorize writes to monitored Azure/AWS resources or a permanent telemetry archive.
+
+[app/storage.py](../app/storage.py) stores compact report JSON with a default 24-hour TTL and count bound. [app/main.py](../app/main.py) cleans every 60 seconds while running; storage operations also remove expired rows. Application downtime can leave expired rows until startup/cleanup resumes. The TTL is not secure erasure and does not delete PostgreSQL WAL, backups, replicas, host logs or recipient mail. Counts do not prove a total byte bound. Input summaries/labels may contain sensitive data: “normalized” does not mean redacted.
+
+PostgreSQL 17 remains a host-managed, loopback service. The dedicated application DB role needs only its approved database/schema privileges; no superuser is required. Production approval requires separating runtime and migration privileges where practical, reviewing database encryption/access and an explicit backup policy. Restores can reintroduce expired reports: restore into an isolated environment, run retention cleanup before exposing reports and prove that backups also age out under their own policy. Caddy stores certificate/account keys in separate persistent volumes; protect and encrypt those backups with restricted access. Store no customer raw log archive in either ingress volume.
+
+## Network and credential trust boundaries
+
+```text
+Approved clients / provider event sources
+  -> host TCP 80 (redirect / ACME), TCP 443 (managed public TLS)
+  -> Caddy container, Linux host network
+  -> HTTP 127.0.0.1:8000 application
+  -> PostgreSQL 127.0.0.1:5432
+Future cloud API calls: scoped read-only provider adapters (currently unsupported)
+Explicit report email request: configured SMTP relay -> approved recipients
+```
+
+The administrator owns domain/DNS and security-group/firewall configuration. No cloud mutation automation is included. The separate [compose.ingress.yaml](../compose.ingress.yaml) requires `RCA_PUBLIC_DOMAIN` and `RCA_TLS_EMAIL` when invoked. The parent is integrating automatic optional deployment of the separate `rca-ingress` project only with both variables, localhost app binding and a distinct operator token of at least 32 characters. Validate those parent checks separately; this composition itself checks only variable presence. It has no socket mount or cloud/database secrets. These deployment conditions provide interim bearer-token protection, not OIDC/RBAC or production readiness. Do not expose the app directly on 8000 or PostgreSQL on 5432. A host-network container can reach host loopback and metadata, so protect the host and instance role accordingly; absence of a Docker socket does not provide full host isolation.
+
+[deploy/Caddyfile](../deploy/Caddyfile) uses a fixed loopback HTTP upstream and replaces forwarding headers using the direct client's connection. No upstream TLS verification bypass exists. Public CA certificates are managed automatically and private keys remain in `/data`. The admin API is off. Standard-image Caddy runs root with only `NET_BIND_SERVICE`, all other capabilities dropped, a read-only root filesystem and no-new-privileges. This explicitly deviates from the objective's non-root requirement and needs reviewed acceptance; no unsupported non-root volume-permission claim is made. The application image independently uses UID 10001 in [Dockerfile](../Dockerfile).
+
+Protect application environment/release secrets, SMTP credentials and PostgreSQL passwords separately from ingress configuration. Do not mount app secret files into Caddy. Prefer scoped instance/workload identities when provider adapters are implemented; no Owner/Contributor/admin keys. Enforce IMDSv2 and review effective metadata access from both host-network containers. Remove unused cloud access from the instance role. Docker administrators and host root can access container secrets and volumes.
+
+## Authentication and authorization gaps
+
+[app/api/routes.py](../app/api/routes.py) uses constant-time bearer-token checks. The deployment baseline described in the runbook shares `WEBHOOK_TOKEN` for events/reports/email. Concurrent code separates `OPERATOR_TOKEN` for reports/email/cloud operations from `WEBHOOK_TOKEN` for intake, with development/test fallback. Concurrent [app/config.py](../app/config.py) adds production startup validation for distinct tokens of at least 32 characters, PostgreSQL and bounded retention. None of these concurrent changes were validated or deployed here. Development may still permit unauthenticated access when tokens are absent. Verify the actual release and runtime configuration; readiness does not prove provider credentials or effective permissions. Separate service tokens still provide no per-user identity, viewer/approver RBAC or approval attribution.
+
+The dashboard holds the entered token in browser memory. Static UI and health/readiness remain public. This is not OIDC/session authentication. The ingress blocks public API docs/schema, but does not add login to the UI. Resolve OIDC/RBAC and native webhook verification before public production use. A restricted staging network and synthetic data are the appropriate current validation setting. Tokens must never appear in URL parameters, browser storage, logs or shared transcripts. Rotation requires updating consumers and the deployment secret; simultaneous/expiring credentials and revocation workflows remain gaps.
+
+Current `/api/v1/events` accepts a normalized schema, not native Azure Monitor/Event Grid or AWS SNS/EventBridge/CloudWatch envelopes. Bearer possession alone does not establish provider origin, timestamp freshness or replay protection. Future verifiers must validate provider-native credentials/signatures, expected issuer/audience, delivery semantics and allowed account/subscription/resource scope. Any remote certificate/key discovery must use approved endpoints and bounds to prevent SSRF; do not fetch arbitrary URLs from an event.
+
+## Prohibited cloud operations and future permission evidence
+
+The engine may observe/query/correlate/explain/notify only. It must never restart, stop/start, redeploy, scale, modify, create/delete, fail over, change IAM/RBAC, firewall/security groups, rotate cloud secrets or remediate a monitored resource. No fix button, cloud mutation runbook, arbitrary terminal/SSH, shell/PowerShell string, script upload, command chaining or free-form production query console is allowed. Event text, cloud logs and optional AI output are untrusted data, never executable instructions.
+
+The baseline plans provider adapters in [app/providers/azure/README.md](../app/providers/azure/README.md), [app/providers/aws/README.md](../app/providers/aws/README.md) and [app/diagnostics/README.md](../app/diagnostics/README.md). Concurrent source adds initial scoped VM inventory/platform-health adapters and [app/cloud.py](../app/cloud.py); this task did not validate their integration, effective permissions or live behavior. Deep telemetry templates and approvals remain unsupported. No live read-only IAM/RBAC claim is warranted. Before enabling any provider:
+
+- Enumerate each implemented SDK/API operation and required actions/resources/conditions. Use dedicated scoped production identities with no administrative credentials. AWS action names alone are not evidence that an operation is safe.
+- Validate effective permissions, including inherited roles, attached/inline policies, resource policies, assume-role trust and organization constraints. Azure Reader/Monitoring Reader plus narrowly scoped workspace query permissions are starting points for review, not a universal permission recipe.
+- Review diagnostics such as KQL and Logs Insights as approved, versioned, parameterized read queries. Query submission can require an action such as `StartQuery` despite being observational; scope/budget it explicitly instead of granting broad writes or claiming every allowed action starts with Get/List/Describe.
+- Prove allowed reads in opt-in non-production Azure and AWS scopes with sanitized traces and denied/partial/throttled/timeout cases. Demonstrate mutation denial through effective-policy analysis/simulation and adapter contract tests; never attempt real production writes to “test read-only.”
+- Independently validate exact query definitions, scope, parameters, time range, version and budgets; bind approvals to those fields and policy versions with expiry and invalidation. The approval workspace/execution service is currently unsupported, even for administrators.
+
+Host/application deployment necessarily changes local containers and application storage. The existing development deployment also performs documented administrative database/host bootstrap. That is separate from monitored-cloud read-only access and needs its own production review; this task changes none of those scripts and grants no additional administration authority.
+
+## Threat review and remaining controls
+
+| Threat | Supplied/current control | Open requirement |
+| --- | --- | --- |
+| Credential/report theft | HTTPS; same-origin CSP, no-store, no-referrer, frame denial; token API checks. | OIDC/RBAC, scope isolation, secret rotation, redaction and identity audit; public health metadata review. |
+| Forged/replayed provider events | Token and typed normalized event fields. | Native source verification, timestamps, replay defenses, schema/scope validation and delivery tests. Exact event hash deduplication is not replay authentication. |
+| Oversized/slow requests and query storms | Caddy 64 KiB body cap, header/time limits; report count/TTL bounds. Concurrent [app/security.py](../app/security.py) adds API size/rate controls, unverified here. | Prove effective app controls; complete aggregate byte/response/concurrency/query/cost/retry/depth budgets, scheduler prioritization and storm tests. |
+| SSRF and proxy spoofing | Fixed Caddy upstream; forwarding headers replaced; no external trusted proxy. | Bound/allowlist any future provider key/source retrieval; validate scope before query execution; review load-balancer trust if added. |
+| Query/command/log-borne injection | Deterministic starter rules and concurrent bounded VM health code; no remediation path observed. | Full adapter review, typed reviewed templates with escaping, independent approval policy and rejection tests. Optional AI must remain disabled by default, advisory only, secret-free and unable to execute. |
+| Host/container compromise | No socket mount, read-only Caddy root, dropped capabilities except bind, admin off. | Root exception acceptance, host patching, dependency/digest review, IMDSv2, minimal role, host access controls and network isolation review. |
+| Data leakage through logs/backups/email | Caddy access and HTTP error logs disabled; runtime log rotation; compact reports and TTL. | Audit app/Uvicorn, host/runtime/SMTP logs; encrypt/restrict backups; confirm external retention and recipient policies. |
+| Lost/duplicate investigations or mail | PostgreSQL report persistence; explicit SMTP submission; health/storage endpoints. | Recovery/restore drills, durable-state scope decision if needed, external redelivery/dead-letter handling, bounded retries, delivery verification and service monitoring. |
+
+Caddy runtime warnings/errors can still contain domain/issuer/error metadata. HTTP error logging is excluded because it may include request URLs and headers; no request body logging is configured. Existing app access logs remain unchanged and can include paths/query strings; never send sensitive identifiers/tokens in URLs. Do not enable access/debug logging for production payloads without a redaction and retention review. Runtime, Docker daemon, host journaling, cloud event stores, SMTP relay and mailboxes have independent retention boundaries. Rotation is a size bound, not a privacy guarantee.
+
+Security acceptance must include sanitized EC2 evidence for TLS renewal, body limits including streamed requests, timeout behavior, headers, volume persistence, effective container privileges, protected ports and absence of sensitive logs; then the complete objective-wide checklist. No tests, builds or Docker commands were executed locally, and no live cloud calls or cloud mutations were performed in this task.

@@ -10,7 +10,8 @@ from app.storage import store
 def request(path, payload=None, authenticated=True):
     headers = {"Content-Type": "application/json"}
     if authenticated:
-        headers["Authorization"] = f"Bearer {os.environ['WEBHOOK_TOKEN']}"
+        token = os.environ["WEBHOOK_TOKEN"] if path == "/api/v1/events" else os.getenv("OPERATOR_TOKEN") or os.environ["WEBHOOK_TOKEN"]
+        headers["Authorization"] = f"Bearer {token}"
     data = json.dumps(payload).encode() if payload is not None else None
     with urlopen(Request(f"http://127.0.0.1:8000{path}", data=data, headers=headers), timeout=15) as response:
         return response.read(), response.headers.get("Content-Type", "")
@@ -21,7 +22,16 @@ def main():
     assert "text/html" in request("/")[1]
     assert request("/static/app.js")[0]
     assert request("/static/app.css")[0]
-    assert json.loads(request("/openapi.json")[0])["paths"]["/api/v1/events"]
+    if os.getenv("APP_ENV") != "production":
+        assert json.loads(request("/openapi.json")[0])["paths"]["/api/v1/events"]
+    else:
+        try:
+            request("/openapi.json")
+        except HTTPError as error:
+            assert error.code == 404
+        else:
+            raise AssertionError("Production API documentation was exposed")
+    assert len(json.loads(request("/api/v1/cloud/connections")[0])["items"]) == 2
     try:
         request("/api/v1/reports", authenticated=False)
     except HTTPError as error:

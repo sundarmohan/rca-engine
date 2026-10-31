@@ -24,9 +24,23 @@ def main():
         "APP_ENV": "development", "APP_BIND_HOST": "127.0.0.1",
         "CACHE_TTL_SECONDS": "86400", "CACHE_MAX_ITEMS": "1000",
         "ENABLE_DEMO_RULES": "true", "SMTP_PORT": "587", "EMAIL_STARTTLS": "true",
+        "AZURE_ENABLED": "false", "AWS_ENABLED": "false",
     }
-    names = list(defaults) + ["WEBHOOK_TOKEN", "DATABASE_URL", "SMTP_HOST", "SMTP_USERNAME", "SMTP_PASSWORD", "EMAIL_FROM", "EMAIL_TO"]
+    names = list(defaults) + ["WEBHOOK_TOKEN", "DATABASE_URL", "SMTP_HOST", "SMTP_USERNAME", "SMTP_PASSWORD", "EMAIL_FROM", "EMAIL_TO", "OPERATOR_TOKEN", "AZURE_TENANT_ID", "AZURE_CLIENT_ID", "AZURE_CLIENT_SECRET", "AZURE_SUBSCRIPTION_IDS", "AZURE_RESOURCE_GROUPS", "AWS_ACCOUNT_IDS", "AWS_REGIONS", "AWS_INSTANCE_IDS", "RCA_PUBLIC_DOMAIN", "RCA_TLS_EMAIL"]
     values = {name: os.getenv(name) or defaults.get(name, "") for name in names}
+    domain = values["RCA_PUBLIC_DOMAIN"]
+    if domain:
+        hostname = r"(?=.{1,253}$)(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?"
+        if not re.fullmatch(hostname, domain):
+            raise SystemExit("RCA_PUBLIC_DOMAIN must be a single DNS hostname without scheme, path or wildcard")
+        email_parts = values["RCA_TLS_EMAIL"].split("@")
+        if len(email_parts) != 2 or not re.fullmatch(r"[a-zA-Z0-9._+-]{1,64}", email_parts[0]) or not re.fullmatch(hostname, email_parts[1]):
+            raise SystemExit("Public HTTPS requires a valid RCA_TLS_EMAIL contact")
+        if len(values["OPERATOR_TOKEN"]) < 32 or values["OPERATOR_TOKEN"] == values["WEBHOOK_TOKEN"]:
+            raise SystemExit("Public HTTPS requires a separate OPERATOR_TOKEN of at least 32 characters")
+        values["APP_BIND_HOST"] = "127.0.0.1"
+    if values["APP_ENV"] == "production" and not domain:
+        raise SystemExit("Production rollout requires a configured HTTPS domain and operator identity")
     for required in ("WEBHOOK_TOKEN", "DATABASE_URL"):
         if not values[required]:
             raise SystemExit(f"Missing Dev environment secret: {required}")

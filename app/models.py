@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any
+from typing import Annotated, Any
 from uuid import uuid4
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 def utc_now() -> datetime:
@@ -19,6 +19,7 @@ class CloudProvider(str, Enum):
 
 
 class IncomingEvent(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     provider: CloudProvider
     event_type: str = Field(min_length=1, max_length=160)
     resource_id: str = Field(min_length=1, max_length=1024)
@@ -27,7 +28,7 @@ class IncomingEvent(BaseModel):
     summary: str = Field(min_length=1, max_length=4000)
     occurred_at: datetime = Field(default_factory=utc_now)
     correlation_id: str | None = Field(default=None, max_length=256)
-    labels: dict[str, str] = Field(default_factory=dict)
+    labels: dict[Annotated[str, Field(max_length=64)], Annotated[str, Field(max_length=256)]] = Field(default_factory=dict, max_length=20)
     # Provider payloads are deliberately not accepted by default to avoid
     # collecting large or sensitive raw telemetry blobs in the cache.
 

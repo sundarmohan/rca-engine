@@ -6,6 +6,7 @@ import subprocess
 import sys
 import time
 from urllib.parse import unquote, urlsplit
+from urllib.request import urlopen
 
 
 def main():
@@ -41,8 +42,15 @@ def main():
     if database_check.returncode != 0:
         raise SystemExit("Database connection preflight failed; running application was not changed")
     subprocess.run(test_container + ["pytest", "-q", "-p", "no:cacheprovider"], env=test_environment, cwd=release, check=True)
+    ingress = ["docker", "compose", "--project-name", "rca-ingress", "--env-file", "/dev/null", "-f", str(release / "compose.ingress.yaml")]
+    validation_environment = environment.copy()
+    validation_environment["RCA_PUBLIC_DOMAIN"] = environment.get("RCA_PUBLIC_DOMAIN") or "rca.example.invalid"
+    validation_environment["RCA_TLS_EMAIL"] = environment.get("RCA_TLS_EMAIL") or "ops@example.invalid"
+    subprocess.run(ingress + ["run", "--rm", "--no-deps", "caddy", "caddy", "validate", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile"], env=validation_environment, cwd=release, check=True)
     result = subprocess.run(["docker", "inspect", "--format", "{{.Config.Image}}", "multicloud-rca-engine"], capture_output=True, text=True)
     previous_image = result.stdout.strip() if result.returncode == 0 else None
+    failed_environment = environment.copy()
+    ingress_started = False
     try:
         run(compose + ["up", "--detach", "--no-build", "--force-recreate"])
         for attempt in range(30):
@@ -53,12 +61,33 @@ def main():
         else:
             raise RuntimeError("API/database readiness timed out")
         run(compose + ["exec", "-T", "rca-engine", "python", "-m", "scripts.smoke_test"])
+        if environment.get("RCA_PUBLIC_DOMAIN"):
+            ingress_started = True
+            run(ingress + ["up", "--detach", "--force-recreate"])
+            for attempt in range(20):
+                try:
+                    with urlopen("https://" + environment["RCA_PUBLIC_DOMAIN"] + "/ready", timeout=5) as response:
+                        if json.loads(response.read(16384)).get("status") == "ready":
+                            break
+                except Exception:
+                    pass
+                time.sleep(3)
+            else:
+                raise RuntimeError("Verified public HTTPS readiness failed; check DNS and inbound TCP 80/443")
+            print("Public HTTPS readiness verified")
     except Exception:
         if previous_image and (app_directory / "current").is_symlink():
             previous_release = (app_directory / "current").resolve()
+            environment = os.environ.copy()
             environment.update(json.loads((previous_release / "runtime.json").read_text(encoding="utf-8")))
             environment["RCA_IMAGE"] = previous_image
             run(["docker", "compose", "--project-name", "rca-engine", "--env-file", "/dev/null", "-f", str(previous_release / "compose.yaml"), "up", "--detach", "--no-build", "--force-recreate"])
+            if environment.get("RCA_PUBLIC_DOMAIN") and (previous_release / "compose.ingress.yaml").exists():
+                run(["docker", "compose", "--project-name", "rca-ingress", "--env-file", "/dev/null", "-f", str(previous_release / "compose.ingress.yaml"), "up", "--detach", "--force-recreate"])
+            elif failed_environment.get("RCA_PUBLIC_DOMAIN"):
+                subprocess.run(["docker", "compose", "--project-name", "rca-ingress", "--env-file", "/dev/null", "-f", str(release / "compose.ingress.yaml"), "stop"], env=failed_environment, cwd=release, check=True)
+        elif ingress_started:
+            subprocess.run(["docker", "compose", "--project-name", "rca-ingress", "--env-file", "/dev/null", "-f", str(release / "compose.ingress.yaml"), "stop"], env=failed_environment, cwd=release, check=True)
         raise SystemExit("Deployment failed; previous managed release restored when available") from None
     temporary_link = app_directory / "current.next"
     temporary_link.unlink(missing_ok=True)

@@ -1,0 +1,40 @@
+name: rca-ingress
+
+services:
+  caddy:
+    image: caddy:2.10.2-alpine
+    network_mode: host
+    user: "0:0"
+    command: ["caddy", "run", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile"]
+    environment:
+      RCA_PUBLIC_DOMAIN: ${RCA_PUBLIC_DOMAIN:?RCA_PUBLIC_DOMAIN must be a single public DNS hostname}
+      RCA_TLS_EMAIL: ${RCA_TLS_EMAIL:?RCA_TLS_EMAIL must be the TLS contact email}
+    volumes:
+      - type: bind
+        source: ./deploy/Caddyfile
+        target: /etc/caddy/Caddyfile
+        read_only: true
+        bind:
+          create_host_path: false
+      - caddy_data:/data
+      - caddy_config:/config
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,noexec,nosuid,nodev
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+    stop_grace_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  caddy_data:
+  caddy_config:

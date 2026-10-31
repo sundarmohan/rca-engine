@@ -4,6 +4,7 @@ import pytest
 
 from scripts.render_runtime import normalize_database_url
 from scripts.configure_postgres import APP_RULE, configured_hba, password_verifier
+from scripts.render_runtime import main as render_runtime
 
 
 @pytest.mark.parametrize("password", ["Dev[p@ss]#word/?:+", "Dev%word", "Dev word", "dev:pass"])
@@ -44,3 +45,34 @@ def test_development_password_verifier_uses_salted_scram_without_plaintext():
     assert verifier.startswith("SCRAM-SHA-256$4096:")
     assert password not in verifier
     assert password_verifier(password) != verifier
+
+
+@pytest.fixture
+def public_runtime(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    for name, value in {
+        "APP_ENV": "development", "APP_BIND_HOST": "0.0.0.0", "WEBHOOK_TOKEN": "w" * 32,
+        "OPERATOR_TOKEN": "o" * 32, "RCA_PUBLIC_DOMAIN": "rca.example.com", "RCA_TLS_EMAIL": "ops@example.com",
+        "DATABASE_URL": "postgresql://rca_engine_user:fake@127.0.0.1:5432/rca_engine_db",
+    }.items():
+        monkeypatch.setenv(name, value)
+    return tmp_path
+
+
+def test_public_ingress_forces_private_application_listener(public_runtime):
+    import json
+
+    render_runtime()
+    assert json.loads((public_runtime / "runtime.json").read_text())["APP_BIND_HOST"] == "127.0.0.1"
+
+
+@pytest.mark.parametrize("name,value", [
+    ("OPERATOR_TOKEN", "w" * 32), ("OPERATOR_TOKEN", "short"),
+    ("RCA_PUBLIC_DOMAIN", "https://rca.example.com"), ("RCA_PUBLIC_DOMAIN", "rca.-invalid.com"),
+    ("RCA_PUBLIC_DOMAIN", "rca.example.com/path"), ("RCA_TLS_EMAIL", "ops{$INJECTION}@example.com"),
+])
+def test_unsafe_public_ingress_configuration_is_rejected(public_runtime, monkeypatch, name, value):
+    monkeypatch.setenv(name, value)
+    with pytest.raises(SystemExit):
+        render_runtime()
+    assert not (public_runtime / "runtime.json").exists()
