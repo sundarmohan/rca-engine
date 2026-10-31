@@ -3,6 +3,7 @@ from urllib.parse import unquote, urlsplit
 import pytest
 
 from scripts.render_runtime import normalize_database_url
+from scripts.configure_postgres import APP_RULE, configured_hba
 
 
 @pytest.mark.parametrize("password", ["Dev[p@ss]#word/?:+", "Dev%word", "Dev word", "dev:pass"])
@@ -28,3 +29,10 @@ def test_assignment_quotes_and_old_container_alias_are_normalized():
 def test_unexpected_database_target_is_not_rewritten():
     value = "postgresql://other:pass@external.example:5432/other"
     assert normalize_database_url(value) == value
+
+
+def test_postgres_rule_is_scoped_idempotent_and_preserves_other_rules():
+    original = "local all all peer\nhost all all 127.0.0.1/32 ident\n"
+    updated = configured_hba(original)
+    assert updated == APP_RULE + "\n" + original
+    assert configured_hba(updated) == updated

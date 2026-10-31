@@ -27,7 +27,14 @@ def main():
     run(["docker", "load", "--input", str(release / "image.tar.gz")])
     test_environment = environment.copy()
     test_environment["TEST_DATABASE_URL"] = environment["DATABASE_URL"]
-    subprocess.run(["docker", "run", "--rm", "--network", "host", "--read-only", "--tmpfs", "/tmp", "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true", "-e", "TEST_DATABASE_URL", image, "python", "-m", "pytest", "-q", "-p", "no:cacheprovider"], env=test_environment, cwd=release, check=True)
+    test_container = ["docker", "run", "--rm", "--network", "host", "--read-only", "--tmpfs", "/tmp", "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true", "-e", "TEST_DATABASE_URL", image, "python", "-m"]
+    database_check = subprocess.run(test_container + ["scripts.check_database"], env=test_environment, cwd=release)
+    if database_check.returncode == 42:
+        run(["sudo", "-n", "-u", "postgres", "python3", str(release / "scripts/configure_postgres.py")])
+        subprocess.run(test_container + ["scripts.check_database"], env=test_environment, cwd=release, check=True)
+    elif database_check.returncode != 0:
+        raise SystemExit("Database connection preflight failed; running application was not changed")
+    subprocess.run(test_container + ["pytest", "-q", "-p", "no:cacheprovider"], env=test_environment, cwd=release, check=True)
     result = subprocess.run(["docker", "inspect", "--format", "{{.Config.Image}}", "multicloud-rca-engine"], capture_output=True, text=True)
     previous_image = result.stdout.strip() if result.returncode == 0 else None
     try:
