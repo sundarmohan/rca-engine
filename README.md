@@ -1,17 +1,21 @@
 # Multi-Cloud RCA Engine
 
-Fresh starter project for a deterministic, read-only incident investigation service for Azure and AWS.
+API and operator dashboard for a deterministic, read-only incident investigation service for Azure and AWS.
 
-## Current status: scaffold, not production-ready
+## Current status: UI/API platform; live cloud diagnostics pending
 
 Implemented now:
 - FastAPI service with health/readiness endpoints.
+- Browser dashboard at `/` to submit normalized events, inspect reports and request email delivery.
+- Bearer-token authentication for event ingestion, report reads and email requests (including development when a token is configured).
+- Optional PostgreSQL report storage with idempotent schema initialization, restart persistence, bounded report counts, deduplication and TTL cleanup.
 - Normalized event ingestion endpoint.
 - Deterministic starter rule and RCA report structure.
 - Bounded in-memory TTL cache (default 24 hours; not durable across restarts).
 - Optional email delivery from an explicitly configured SMTP sender to a configured recipient.
 - Docker image running as a non-root user with a read-only root filesystem in Compose.
 - Basic API tests.
+- GitHub Actions image build and EC2 deployment using the `Dev` environment. API and PostgreSQL tests execute on EC2 before rollout, followed by deployed UI/API smoke checks.
 
 Not implemented yet:
 - Live Azure/AWS credentials, discovery and resource inventory.
@@ -37,6 +41,7 @@ uvicorn app.main:app --reload
 ```
 
 Open `http://127.0.0.1:8000/docs` for the interactive API documentation.
+Open `http://127.0.0.1:8000/` for the dashboard. Enter your configured webhook token to access reports.
 
 ## Test
 
@@ -45,6 +50,8 @@ pytest -q
 ```
 
 ## Docker
+
+The provided Compose configuration targets **Linux EC2 host networking**, allowing the container to reach host-installed PostgreSQL at `127.0.0.1:5432`. For deployment prerequisites, secrets, UI access and rollback, see [DEPLOY_EC2.md](./DEPLOY_EC2.md).
 
 ```bash
 cp .env.example .env
@@ -69,6 +76,7 @@ This produces a starter report only. It does not query Azure/AWS yet, so the roo
 - No cloud SDK adapters currently make cloud calls.
 - No endpoint performs remediation or infrastructure writes.
 - Do not accept arbitrary commands or query strings from alerts.
-- Normalized events and reports are held in process memory only and expire after the configured TTL. A process restart loses them; this is an intentional trade-off for the no-database starter.
+- Without `DATABASE_URL`, reports use bounded process memory and are lost on restart. With `DATABASE_URL`, compact reports persist in PostgreSQL across restarts; default TTL is 24 hours with cleanup every 60 seconds and on reads/writes, bounded to 1,000 reports. Replaying the same normalized event with a stable `occurred_at` reuses its report until expiry.
+- PostgreSQL persistence was explicitly requested after the original no-database objective. Database backups, WAL, replicas and host/email logs are outside application TTL cleanup and require their own retention policy. No raw provider logs are stored by this platform.
 - Container logs, host logs, cloud provider event services and email systems may retain data outside this application's cache. Configure those systems separately to meet retention requirements.
 - Do not put secrets or raw sensitive logs in event summaries.

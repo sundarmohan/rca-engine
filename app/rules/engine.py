@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 from app.models import Evidence, Finding, IncomingEvent
+from app.config import settings
 
 
 class RuleEngine:
     """Deterministic starter rules. Cloud-specific rules are added in later stages."""
 
     def evaluate_event(self, event: IncomingEvent) -> list[Finding]:
+        if not settings.enable_demo_rules:
+            return []
         findings: list[Finding] = []
         severity = event.severity.lower()
         if severity in {"critical", "sev0", "sev1", "high"}:

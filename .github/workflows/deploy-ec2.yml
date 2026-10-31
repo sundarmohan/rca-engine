@@ -1,0 +1,122 @@
+name: Deploy (EC2)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - app/**
+      - tests/**
+      - scripts/**
+      - requirements.txt
+      - Dockerfile
+      - compose.yaml
+      - pytest.ini
+      - .github/workflows/deploy-ec2.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ec2-dev-deployment
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build immutable image
+        run: |
+          docker build --tag "rca-engine:${GITHUB_SHA}" .
+          docker save "rca-engine:${GITHUB_SHA}" | gzip > image.tar.gz
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ec2-image
+          path: image.tar.gz
+          retention-days: 1
+
+  deploy:
+    needs: build
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: Dev
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: ec2-image
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Validate and render runtime
+        env:
+          APP_ENV: ${{ secrets.APP_ENV || 'development' }}
+          APP_BIND_HOST: ${{ vars.APP_BIND_HOST || '127.0.0.1' }}
+          WEBHOOK_TOKEN: ${{ secrets.WEBHOOK_TOKEN }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          CACHE_TTL_SECONDS: ${{ secrets.CACHE_TTL_SECONDS }}
+          CACHE_MAX_ITEMS: ${{ secrets.CACHE_MAX_ITEMS }}
+          ENABLE_DEMO_RULES: ${{ secrets.ENABLE_DEMO_RULES }}
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USERNAME: ${{ secrets.SMTP_USERNAME }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
+          EMAIL_TO: ${{ secrets.EMAIL_TO }}
+          EMAIL_STARTTLS: ${{ secrets.EMAIL_STARTTLS }}
+        run: python scripts/render_runtime.py
+      - uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
+      - name: Transfer release and deploy
+        env:
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+          EC2_USER: ${{ secrets.EC2_USER }}
+          EC2_APP_DIR: ${{ secrets.EC2_APP_DIR }}
+          EC2_KNOWN_HOSTS: ${{ secrets.EC2_KNOWN_HOSTS }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          APP_DIR="${EC2_APP_DIR:-/opt/rca-engine}"
+          [[ "$EC2_HOST" =~ ^[a-zA-Z0-9][a-zA-Z0-9.-]*$ ]] || { echo 'Invalid EC2_HOST'; exit 1; }
+          [[ "$EC2_USER" =~ ^[a-zA-Z_][a-zA-Z0-9_-]*$ ]] || { echo 'Invalid EC2_USER'; exit 1; }
+          [[ "$APP_DIR" =~ ^/(opt|home|srv)/[a-zA-Z0-9_./-]+$ && "$APP_DIR" != *..* ]] || { echo 'Invalid EC2_APP_DIR'; exit 1; }
+          mkdir -p ~/.ssh
+          if [[ -n "$EC2_KNOWN_HOSTS" ]]; then
+            printf '%s\n' "$EC2_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          else
+            ssh-keyscan -T 10 -H "$EC2_HOST" > ~/.ssh/known_hosts
+            echo 'Using first-use SSH host trust; add EC2_KNOWN_HOSTS to pin the verified host key.'
+          fi
+          chmod 600 ~/.ssh/known_hosts
+          SSH_OPTS=(-o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15 -o ServerAliveInterval=15)
+          ssh "${SSH_OPTS[@]}" "${EC2_USER}@${EC2_HOST}" bash -s -- "$APP_DIR" "$GITHUB_SHA" <<'REMOTE'
+          set -euo pipefail
+          command -v python3 >/dev/null
+          docker info >/dev/null
+          docker compose version >/dev/null
+          app_dir="$1"
+          if [ ! -d "$app_dir" ]; then
+            sudo -n install -d -m 700 -o "$(id -un)" -g "$(id -gn)" "$app_dir"
+          fi
+          test -O "$app_dir" && test -w "$app_dir"
+          mkdir -p "$app_dir/releases/$2"
+          chmod 700 "$app_dir/releases/$2"
+          REMOTE
+          tar -czf release.tar.gz compose.yaml scripts runtime.json
+          scp "${SSH_OPTS[@]}" image.tar.gz release.tar.gz "${EC2_USER}@${EC2_HOST}:${APP_DIR}/releases/${GITHUB_SHA}/"
+          ssh "${SSH_OPTS[@]}" "${EC2_USER}@${EC2_HOST}" bash -s -- "$APP_DIR" "$GITHUB_SHA" <<'REMOTE'
+          set -euo pipefail
+          cd "$1/releases/$2"
+          tar -xzf release.tar.gz
+          rm release.tar.gz
+          chmod 600 runtime.json
+          bash scripts/deploy_ec2.sh
+          REMOTE
+          echo 'EC2 UI/API/database verification completed.' >> "$GITHUB_STEP_SUMMARY"
+      - name: Clean runner secrets
+        if: always()
+        run: rm -f runtime.json release.tar.gz

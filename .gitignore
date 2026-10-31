@@ -1,4 +1,6 @@
 .env
+runtime.json
+*.tar.gz
 .venv/
 __pycache__/
 .pytest_cache/

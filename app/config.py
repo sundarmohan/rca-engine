@@ -16,6 +16,7 @@ class Settings:
     app_name: str = os.getenv("APP_NAME", "Multi-Cloud RCA Engine")
     environment: str = os.getenv("APP_ENV", "development")
     webhook_token: str = os.getenv("WEBHOOK_TOKEN", "")
+    database_url: str = os.getenv("DATABASE_URL", "")
     cache_ttl_seconds: int = int(os.getenv("CACHE_TTL_SECONDS", "86400"))
     cache_max_items: int = int(os.getenv("CACHE_MAX_ITEMS", "1000"))
     smtp_host: str = os.getenv("SMTP_HOST", "")

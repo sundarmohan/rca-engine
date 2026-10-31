@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>Cloud Atlas · Incident workspace</title>
+  <link rel="stylesheet" href="/static/app.css">
+  <script src="/static/app.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to workspace</a>
+  <aside class="sidebar" aria-label="Workspace navigation">
+    <a class="brand" href="/" aria-label="Cloud Atlas home"><span class="brand-mark" aria-hidden="true">CA</span><span>Cloud Atlas<small>INVESTIGATION WORKSPACE</small></span></a>
+    <div class="nav-label">WORKSPACE</div>
+    <a class="nav-item" href="#main" aria-current="page"><span aria-hidden="true">▦</span> Incidents <span class="nav-dot" aria-hidden="true"></span></a>
+    <div class="sidebar-bottom"><span class="mode-dot" aria-hidden="true"></span> Read-only investigation<p>Evidence first.<br>Human decisions always.</p><span class="version">MULTICLOUD RCA ENGINE</span></div>
+  </aside>
+  <div class="shell">
+    <header class="topbar"><span class="breadcrumb">Workspace <span aria-hidden="true">/</span> <strong>Incidents</strong></span><div class="topbar-actions"><span id="connection-status" class="connection">Disconnected</span><button id="connect-button" class="button button-small" type="button">Connect</button><button id="disconnect-button" class="button button-small" type="button" hidden>Disconnect</button></div></header>
+    <main id="main" tabindex="-1">
+      <div class="page-heading"><div><p class="eyebrow">OBSERVE · INVESTIGATE · UNDERSTAND</p><h1>Incident workspace</h1><p class="subtitle">A clear view of your cloud events and the evidence behind them.</p></div><button id="new-event-button" class="button button-primary" type="button" disabled><span aria-hidden="true">＋</span> Submit event</button></div>
+      <div class="notice"><span class="notice-icon" aria-hidden="true">i</span><div><strong>Investigation scaffold — diagnostic coverage is limited</strong><p>Cloud diagnostic adapters are not implemented. Reports are preliminary and do not establish a verified root cause. No remediation is performed.</p></div></div>
+      <section class="metrics" aria-label="Workspace overview">
+        <div class="metric"><span>Total reports</span><strong id="total-count">—</strong><small>Reported by the service</small></div>
+        <div class="metric"><span>High severity</span><strong id="high-count">—</strong><small>In the latest loaded reports</small></div>
+        <div class="metric"><span>Evidence gaps</span><strong id="gap-count">—</strong><small>Reports with missing evidence</small></div>
+        <div class="metric service-metric"><span>Service readiness</span><strong id="ready-status">Checking…</strong><small id="storage-status">Storage: checking…</small></div>
+      </section>
+      <div id="workspace-message" class="message" role="status" aria-live="polite" hidden></div>
+      <div class="workspace-grid">
+        <section class="panel incident-panel" aria-labelledby="incidents-heading">
+          <div class="panel-heading"><div><h2 id="incidents-heading">Recent incidents</h2><p id="list-description">Connect to load the latest 50 reports.</p></div><button id="refresh-button" class="button button-small" type="button" disabled><span aria-hidden="true">↻</span> Refresh</button></div>
+          <div class="filters"><div class="search-field"><label class="sr-only" for="search">Search loaded reports</label><span aria-hidden="true">⌕</span><input id="search" type="search" placeholder="Search summary or resource…" maxlength="200"></div><div class="filter-row"><div><label class="sr-only" for="provider-filter">Filter by provider</label><select id="provider-filter"><option value="">All clouds</option><option value="azure">Azure</option><option value="aws">AWS</option><option value="unknown">Unknown</option></select></div><div><label class="sr-only" for="severity-filter">Filter by severity</label><select id="severity-filter"><option value="">All severities</option><option value="high">High / critical</option><option value="warning">Warning / medium</option><option value="low">Low / info</option><option value="other">Other</option></select></div></div></div>
+          <div id="incident-list" class="incident-list" aria-busy="false"></div>
+          <div id="list-empty" class="empty-state"><span class="empty-symbol" aria-hidden="true">▤</span><h3 id="empty-title">Your investigations start here</h3><p id="empty-description">Connect with a bearer token to explore reports or submit a normalized event.</p></div>
+          <div class="panel-footer"><span id="visible-count">No reports loaded</span><span>Temporary report cache</span></div>
+        </section>
+        <section class="panel detail-panel" aria-labelledby="detail-heading" aria-busy="false" id="detail-panel"><div class="panel-heading"><div><p class="eyebrow">INVESTIGATION</p><h2 id="detail-heading">Report details</h2></div><span class="read-only-tag">Read only</span></div><div id="detail-placeholder" class="empty-state detail-empty"><span class="empty-symbol" aria-hidden="true">◎</span><h3>Select an incident</h3><p>Explore findings, supporting evidence, and what still needs to be investigated.</p></div><div id="detail-content" hidden></div></section>
+      </div>
+      <footer class="page-footer"><span>Cloud Atlas · Multi-cloud visibility</span><span>Reports may expire from temporary storage.</span></footer>
+    </main>
+  </div>
+  <dialog id="auth-dialog" aria-labelledby="auth-title" aria-describedby="auth-description">
+    <form id="auth-form" class="dialog-body"><div class="dialog-heading"><div><p class="eyebrow">WORKSPACE ACCESS</p><h2 id="auth-title">Connect to your service</h2></div><button class="icon-button" type="button" data-close="auth-dialog" aria-label="Close connection dialog">×</button></div><p id="auth-description" class="subtitle">Enter your bearer token to access incident reports. The token is held only in memory and cleared when you disconnect or reload.</p><label for="token">Bearer token</label><input id="token" name="token" type="password" autocomplete="off" spellcheck="false" required placeholder="Paste your access token" aria-describedby="token-help"><p class="field-help" id="token-help">Enter the token only, without the “Bearer” prefix.</p><div id="auth-message" class="message" role="status" aria-live="polite" hidden></div><div class="dialog-footer"><button class="button" type="button" data-close="auth-dialog">Cancel</button><button class="button button-primary" id="auth-submit" type="submit">Connect</button></div></form>
+  </dialog>
+  <dialog id="event-dialog" aria-labelledby="event-title" aria-describedby="event-description">
+    <form id="event-form" class="dialog-body"><div class="dialog-heading"><div><p class="eyebrow">NORMALIZED INPUT</p><h2 id="event-title">Submit a cloud event</h2></div><button class="icon-button" type="button" data-close="event-dialog" aria-label="Close event dialog">×</button></div><p class="subtitle" id="event-description">Create a preliminary report from a compact event. Include relevant context; avoid secrets and raw telemetry.</p><div class="form-grid"><div><label for="event-provider">Cloud provider</label><select id="event-provider" name="provider" required><option value="azure">Azure</option><option value="aws">AWS</option><option value="unknown">Unknown</option></select></div><div><label for="event-severity">Severity</label><select id="event-severity" name="severity" required><option value="warning">Warning</option><option value="critical">Critical</option><option value="high">High</option><option value="medium">Medium</option><option value="low">Low</option><option value="info">Info</option></select></div></div><label for="event-resource">Resource ID <span class="required-label">Required</span></label><input id="event-resource" name="resource_id" maxlength="1024" required placeholder="Resource ARN, Azure resource ID, or identifier"><div class="form-grid"><div><label for="event-resource-type">Resource type <span class="optional">Optional</span></label><input id="event-resource-type" name="resource_type" maxlength="160" placeholder="e.g. virtual_machine"></div><div><label for="event-type">Event type</label><input id="event-type" name="event_type" maxlength="160" required placeholder="e.g. availability_alert"></div></div><label for="event-summary">Summary</label><textarea id="event-summary" name="summary" rows="4" maxlength="4000" required placeholder="Describe what was observed and the affected resource."></textarea><p class="field-help">The service timestamps this event when received. No cloud commands or remediation are executed.</p><div id="event-message" class="message" role="status" aria-live="polite" hidden></div><div class="dialog-footer"><button class="button" type="button" data-close="event-dialog">Cancel</button><button class="button button-primary" id="event-submit" type="submit">Create report</button></div></form>
+  </dialog>
+  <noscript><p class="noscript">JavaScript is required to connect to the service and view reports. Cloud diagnostic adapters are not implemented; reports do not verify root cause.</p></noscript>
+</body>
+</html>

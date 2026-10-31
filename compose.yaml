@@ -1,11 +1,24 @@
 services:
   rca-engine:
     build: .
+    image: ${RCA_IMAGE:-rca-engine:local}
     container_name: multicloud-rca-engine
-    ports:
-      - "8000:8000"
-    env_file:
-      - .env
+    network_mode: host
+    command: ["uvicorn", "app.main:app", "--host", "${APP_BIND_HOST:-127.0.0.1}", "--port", "8000"]
+    environment:
+      APP_ENV: ${APP_ENV:-development}
+      WEBHOOK_TOKEN: ${WEBHOOK_TOKEN:?WEBHOOK_TOKEN is required}
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
+      CACHE_TTL_SECONDS: ${CACHE_TTL_SECONDS:-86400}
+      CACHE_MAX_ITEMS: ${CACHE_MAX_ITEMS:-1000}
+      ENABLE_DEMO_RULES: ${ENABLE_DEMO_RULES:-true}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USERNAME: ${SMTP_USERNAME:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      EMAIL_FROM: ${EMAIL_FROM:-}
+      EMAIL_TO: ${EMAIL_TO:-}
+      EMAIL_STARTTLS: ${EMAIL_STARTTLS:-true}
     restart: unless-stopped
     read_only: true
     tmpfs:
@@ -14,3 +27,14 @@ services:
       - no-new-privileges:true
     cap_drop:
       - ALL
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/ready', timeout=5)"]
+      interval: 15s
+      timeout: 6s
+      retries: 6
+      start_period: 15s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

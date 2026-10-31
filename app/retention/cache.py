@@ -43,6 +43,11 @@ class TTLCache:
         with self._lock:
             self._items.pop(key, None)
 
+    def values(self, prefix: str) -> list[Any]:
+        with self._lock:
+            self._purge()
+            return [value for key, (_, value) in self._items.items() if key.startswith(prefix)]
+
     def count(self) -> int:
         with self._lock:
             self._purge()
