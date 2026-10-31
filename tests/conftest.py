@@ -6,6 +6,7 @@ from app.api import routes
 from app import main
 from app.storage import MemoryStore
 from app.cloud import CloudConfiguration, CloudService
+from app.support import SupportService
 
 
 @pytest.fixture(autouse=True)
@@ -17,5 +18,8 @@ def isolated_application(monkeypatch):
     cloud = CloudService(CloudConfiguration())
     monkeypatch.setattr(routes, "cloud_service", cloud)
     monkeypatch.setattr(main, "cloud_service", cloud)
+    support = SupportService()
+    monkeypatch.setattr(routes, "support_service", support)
+    monkeypatch.setattr(main, "support_service", support)
     yield
     cloud.close()

@@ -19,6 +19,7 @@ Implemented now:
 - Explicitly enabled Azure VM inventory/instance-view health and AWS EC2 inventory/instance/system checks, behind bounded provider adapters and an authenticated cloud workspace.
 - Separate operator/webhook credentials, fail-closed production startup, 64 KiB API bodies, single-process global rate limits and two concurrent cloud operations.
 - Optional Caddy HTTPS ingress when a domain, TLS contact and distinct operator token are configured. Application and PostgreSQL remain on loopback.
+- Development-only human assistance: fixed VM-health query proposals, exact-definition approvals with expiry/replay checks, revision/reject/cancel controls and compare-and-swap report updates without extending retention. Shared operator approval is not independent human authorization.
 
 Not implemented yet:
 - Live staging identity, effective read-only permissions and telemetry validation. AWS cross-account role assumption is unsupported.
@@ -27,9 +28,11 @@ Not implemented yet:
 - Resource-specific dependency correlation and mature RCA rule packs.
 - Production identity validation, secret management and hardened webhook auth integration.
 - Email provider integration beyond SMTP.
-- OIDC/RBAC, typed query proposals with approval/revision/expiry, assistance workflows, automatic email retries, backup/restore verification and production security sign-off.
+- OIDC/RBAC and independent approvers, deeper typed telemetry proposals, durable assistance audit, automatic email retries, backup/restore verification and production security sign-off.
 
 Current cloud checks collect platform observations, not historical root causes. Review [cloud setup](./docs/CLOUD_SETUP.md) and the [production no-go checklist](./docs/PRODUCTION_READINESS.md) before enabling any production scope. No tests are run locally or on the build runner by the deployment workflow.
+
+Development site: <https://rca.genixtec.com/>. UI access uses `OPERATOR_TOKEN`. Public API documentation is blocked; see [EC2 deployment](./DEPLOY_EC2.md) for the development SSH tunnel. Cloud connectivity still requires explicit identity and scope configuration. The supported capability list is available at authenticated `/api/v1/capabilities`.
 
 ## Local run
 

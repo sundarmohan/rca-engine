@@ -10,15 +10,18 @@ from app.config import settings
 from app.cloud import cloud_service
 from app.providers.common import ProviderError
 from app.security import RequestLimits
-from app.storage import StorageUnavailable, store
+from app.storage import ReportConflictError, ReportTooLarge, StorageUnavailable, store
+from app.support import SupportError
+from app.api.routes import support_service
 
 
 async def cleanup_reports() -> None:
     while True:
         await asyncio.sleep(60)
+        cloud_service.purge()
+        support_service.purge()
         try:
             await asyncio.to_thread(store.purge)
-            cloud_service.purge()
         except StorageUnavailable:
             pass
 
@@ -49,6 +52,22 @@ app.add_middleware(RequestLimits)
 app.include_router(router, prefix="/api/v1")
 static_directory = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=static_directory, check_dir=False), name="static")
+
+
+@app.exception_handler(SupportError)
+async def support_error(request, exception):
+    status = {"scope": 403, "policy": 400, "busy": 429, "capacity": 429}.get(exception.category, 409)
+    return JSONResponse(status_code=status, content={"detail": "Support request unavailable", "category": exception.category})
+
+
+@app.exception_handler(ReportConflictError)
+async def revision_error(request, exception):
+    return JSONResponse(status_code=409, content={"detail": "Report revision changed; review a new proposal"})
+
+
+@app.exception_handler(ReportTooLarge)
+async def report_size_error(request, exception):
+    return JSONResponse(status_code=413, content={"detail": "Report exceeds storage size budget"})
 
 
 @app.exception_handler(StorageUnavailable)

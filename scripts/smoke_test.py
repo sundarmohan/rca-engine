@@ -5,6 +5,7 @@ from urllib.request import Request, urlopen
 from uuid import uuid4
 
 from app.storage import store
+from app.models import RCAReport
 
 
 def request(path, payload=None, authenticated=True):
@@ -32,6 +33,7 @@ def main():
         else:
             raise AssertionError("Production API documentation was exposed")
     assert len(json.loads(request("/api/v1/cloud/connections")[0])["items"]) == 2
+    assert json.loads(request("/api/v1/capabilities")[0])["production_ready"] is False
     try:
         request("/api/v1/reports", authenticated=False)
     except HTTPError as error:
@@ -44,10 +46,17 @@ def main():
         assert json.loads(request("/api/v1/events", event)[0])["incident_id"] == report["incident_id"]
         assert json.loads(request(f"/api/v1/reports/{report['incident_id']}")[0])["incident_id"] == report["incident_id"]
         assert store.get(report["incident_id"]) is not None
+        if os.getenv("APP_ENV") in {"development", "test"}:
+            assistance = json.loads(request(f"/api/v1/reports/{report['incident_id']}/support")[0])
+            assert assistance["approval_required"] is True
+            assert assistance["status"] == "needs_human_assistance"
+        revised = store.update_report(report["incident_id"], RCAReport.model_validate(report), 1)
+        assert revised["metadata"]["report_revision"] == 2
+        assert json.loads(request(f"/api/v1/reports/{report['incident_id']}")[0])["metadata"]["report_revision"] == 2
     finally:
         with store.connect() as connection:
             connection.execute("DELETE FROM rca_reports WHERE incident_id = %s", (report["incident_id"],))
-    print("EC2 smoke tests passed: UI, API, token authentication, PostgreSQL persistence, deduplication")
+    print("EC2 smoke tests passed: UI, API, token authentication, PostgreSQL persistence, deduplication, report revision and support readiness")
 
 
 if __name__ == "__main__":

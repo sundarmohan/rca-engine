@@ -2,7 +2,7 @@
 
 (() => {
   const $ = (id) => document.getElementById(id);
-  const state = { token: "", authenticated: false, epoch: 0, reports: [], total: 0, loaded: false, selected: null, listRequest: 0, detailRequest: 0, controllers: new Set() };
+  const state = { token: "", authenticated: false, epoch: 0, reports: [], total: 0, loaded: false, selected: null, listRequest: 0, detailRequest: 0, controllers: new Set(), support: null };
   const cloudProviders = { azure: "Azure VM", aws: "AWS EC2" };
   const cloud = { loaded: false, loading: false, sequence: 0, providers: {} };
   function resetCloud() {
@@ -52,6 +52,7 @@
     renderCloud();
   }
   function disconnect(reason = "Disconnected. Your token and loaded reports have been cleared.") {
+    clearSupport();
     state.token = "";
     state.authenticated = false;
     state.epoch += 1;
@@ -85,14 +86,19 @@
   class ApiError extends Error {
     constructor(messageText, status) { super(messageText); this.status = status; }
   }
-  async function request(path, { method = "GET", body, publicRequest = false, tokenOverride } = {}) {
+  async function request(path, { method = "GET", body, publicRequest = false, tokenOverride, signal } = {}) {
     if (!publicRequest && !state.token) throw new ApiError("Connect with a bearer token first.", 401);
     const webhookRequest = tokenOverride !== undefined;
     if (webhookRequest && (path !== "/api/v1/events" || method !== "POST" || publicRequest || typeof tokenOverride !== "string" || !tokenOverride || /\s/.test(tokenOverride))) throw new ApiError("A webhook token can only be used to submit an event.", 0);
     const epoch = state.epoch;
     const controller = new AbortController();
     state.controllers.add(controller);
-    const timer = setTimeout(() => controller.abort(), path.startsWith("/api/v1/cloud/") ? 35000 : 20000);
+    const abort = () => controller.abort();
+    if (signal?.aborted) abort();
+    else signal?.addEventListener("abort", abort, { once: true });
+    const supportExecute = method === "POST" && /^\/api\/v1\/support\/proposals\/[^/]+\/execute$/.test(path);
+    const timeout = supportExecute ? 60000 : path.startsWith("/api/v1/cloud/") ? 35000 : 20000;
+    const timer = setTimeout(abort, timeout);
     try {
       const headers = { Accept: "application/json" };
       if (!publicRequest) headers.Authorization = `Bearer ${webhookRequest ? tokenOverride : state.token}`;
@@ -129,6 +135,7 @@
       throw new ApiError(error.name === "AbortError" ? "Request cancelled or timed out. Try refreshing." : "Unable to reach the service. Check your connection and try again.", 0);
     } finally {
       clearTimeout(timer);
+      signal?.removeEventListener("abort", abort);
       state.controllers.delete(controller);
     }
   }
@@ -196,6 +203,7 @@
     $("cloud-connections").replaceChildren(fragment);
     const restoreFocus = $(cloud.focusedControl);
     if (restoreFocus && !restoreFocus.disabled && (focusedControl || document.activeElement === document.body)) restoreFocus.focus();
+    state.support?.refreshResources();
   }
   async function loadConnections() {
     if (!state.authenticated || !state.token || cloud.loading || Object.values(cloud.providers).some((item) => item.busy)) return;
@@ -387,6 +395,266 @@
     for (const value of items) list.append(node("li", "", value));
     parent.append(list);
   }
+  function clearSupport() {
+    if (state.support) {
+      state.support.controller.abort();
+      clearTimeout(state.support.timer);
+      state.support.assistance = null;
+      state.support.reason = "";
+      state.support.resourceKey = "";
+      state.support.revisions.clear();
+    }
+    state.support = null;
+  }
+  const supportText = (value, fallback = "Not provided") => typeof value === "string" || typeof value === "number" || typeof value === "boolean" ? String(value).slice(0, 1000) : fallback;
+  function matchingResources(report) {
+    const provider = report.provider;
+    const item = cloud.providers[provider];
+    if (!item || !item.discovered || item.busy || cloud.loading || Date.now() >= item.expiresAt || typeof report.resource_id !== "string") return [];
+    return item.resources.filter((resource) => resource.provider === provider && typeof resource.resource_key === "string" && resource.resource_key && resource.resource_id === report.resource_id && resource.resource_type === report.resource_type);
+  }
+  function proposalId(proposal) {
+    return typeof proposal?.proposal_id === "string" && proposal.proposal_id ? proposal.proposal_id : typeof proposal?.id === "string" ? proposal.id : "";
+  }
+  function validProposal(proposal) {
+    return Boolean(proposalId(proposal) && typeof proposal.definition_hash === "string" && /^[0-9a-f]{64}$/.test(proposal.definition_hash) && typeof proposal.status === "string" && proposal.definition && typeof proposal.definition === "object" && !Array.isArray(proposal.definition) && Number.isFinite(Date.parse(proposal.definition.expires_at)));
+  }
+  function addSupport(body, report) {
+    clearSupport();
+    const panel = $("support-template").content.firstElementChild.cloneNode(true);
+    const load = panel.querySelector("[data-support-load]");
+    const feedback = panel.querySelector("[data-support-message]");
+    const content = panel.querySelector("[data-support-content]");
+    const workflow = { epoch: state.epoch, sequence: state.detailRequest, controller: new AbortController(), busy: false, loaded: false, uncertain: false, unavailable: false, assistance: null, reason: "", resourceKey: "", revisions: new Map(), timer: null, refreshResources: () => {} };
+    state.support = workflow;
+    const current = () => state.support === workflow && state.epoch === workflow.epoch && state.detailRequest === workflow.sequence && state.selected === report.incident_id && state.authenticated && Boolean(state.token);
+    function feedbackMessage(value, error = false) {
+      feedback.textContent = value;
+      feedback.classList.toggle("error", error);
+      feedback.hidden = !value;
+    }
+    function button(caption, handler, disabled = false) {
+      const control = node("button", "button button-small", caption);
+      control.type = "button";
+      control.disabled = disabled;
+      control.addEventListener("click", handler);
+      return control;
+    }
+    function reasonField(parent, id, label, value, update) {
+      const input = node("textarea");
+      input.id = id;
+      input.maxLength = 500;
+      input.rows = 3;
+      input.value = value;
+      input.disabled = workflow.busy || workflow.unavailable;
+      const caption = node("label", "", label);
+      caption.htmlFor = id;
+      input.addEventListener("input", () => update(input.value));
+      parent.append(caption, input);
+      return input;
+    }
+    function render() {
+      if (!current()) return;
+      const focusedId = content.contains(document.activeElement) ? document.activeElement.id : "";
+      clearTimeout(workflow.timer);
+      panel.setAttribute("aria-busy", String(workflow.busy));
+      load.disabled = workflow.busy;
+      load.textContent = workflow.busy ? "Working..." : workflow.loaded ? "Refresh assistance" : "Load assistance";
+      content.replaceChildren();
+      if (!workflow.loaded) return;
+      const assistance = workflow.assistance;
+      content.append(node("p", "field-help", `${supportText(assistance.status)} · ${supportText(assistance.gap_category)} · Report revision ${supportText(assistance.report_revision)} · Assistance expires ${date(assistance.expires_at)}`));
+      const gaps = array(assistance.evidence_gaps).slice(0, 20).map((gap) => supportText(gap, "Evidence gap listed; details unavailable."));
+      section(content, "Assistance gaps", gaps, "No assistance gaps were listed. This does not verify completeness or root cause.", "gap-list");
+      for (const [caption, values] of [["Questions for human review", assistance.questions], ["Recommended next steps", assistance.recommended_next_steps], ["Evidence references", assistance.evidence_references], ["Executed query references", assistance.executed_queries]]) {
+        section(content, caption, array(values).slice(0, 20).map((value) => supportText(value)), "None were listed.");
+      }
+      const form = node("form", "support-form");
+      form.append(node("h4", "", "Propose current VM health follow-up"), node("p", "field-help", "Fixed follow-up: check current VM health for this report's resource. Choose only a matching resource from cached cloud discovery. Reasons are limited to 500 characters; avoid secrets and raw telemetry."));
+      const label = node("label", "", "Cached resource matching this report");
+      label.htmlFor = "support-resource";
+      const select = node("select");
+      select.id = "support-resource";
+      select.addEventListener("change", () => { workflow.resourceKey = select.value; });
+      const create = node("button", "button button-primary", "Propose current VM health");
+      create.type = "submit";
+      workflow.refreshResources = () => {
+        if (!current()) return;
+        const resources = matchingResources(report);
+        select.replaceChildren(node("option", "", resources.length ? "Select the matching cached resource" : "No matching cached resource available"));
+        select.firstElementChild.value = "";
+        for (const resource of resources) {
+          const option = node("option", "", `${supportText(resource.provider)}: ${supportText(resource.resource_id)}`);
+          option.value = resource.resource_key;
+          select.append(option);
+        }
+        if (!resources.some((resource) => resource.resource_key === workflow.resourceKey)) workflow.resourceKey = "";
+        select.value = workflow.resourceKey;
+        select.disabled = workflow.busy || workflow.unavailable || workflow.uncertain || !resources.length;
+        create.disabled = select.disabled;
+      };
+      form.append(label, select, node("p", "field-help", "Use Cloud connections above to verify identity and discover resources again if the cache is empty or expired."));
+      const reason = reasonField(form, "support-reason", "Reason (1–500 characters)", workflow.reason, (value) => { workflow.reason = value; });
+      reason.required = true;
+      form.append(create);
+      form.addEventListener("submit", (event) => {
+        event.preventDefault();
+        if (!current() || workflow.busy || workflow.unavailable || workflow.uncertain) return;
+        const resource = matchingResources(report).find((value) => value.resource_key === select.value);
+        if (!resource) { workflow.refreshResources(); feedbackMessage("Select a matching, unexpired resource from cloud discovery.", true); return; }
+        const value = reason.value.trim();
+        if (!value || value.length > 500) { feedbackMessage("Enter a reason between 1 and 500 characters.", true); reason.focus(); return; }
+        transact(`/api/v1/reports/${encodeURIComponent(report.incident_id)}/proposals`, { resource_key: resource.resource_key, reason: value }, "propose");
+      });
+      content.append(form);
+      workflow.refreshResources();
+      const proposals = array(assistance.proposals).slice(-20).reverse();
+      const heading = node("div", "section-heading");
+      heading.append(node("h3", "", "Proposals"), node("span", "section-count", proposals.length));
+      content.append(heading);
+      if (!proposals.length) content.append(node("p", "section-empty", "No proposals were returned."));
+      let nextExpiry = Infinity;
+      for (const [index, proposal] of proposals.entries()) {
+        if (!proposal || typeof proposal !== "object") continue;
+        const id = proposalId(proposal);
+        const definition = proposal.definition && typeof proposal.definition === "object" ? proposal.definition : {};
+        const scope = definition;
+        const card = node("article", "proposal-card");
+        const line = node("div", "tag-line");
+        line.append(node("h4", "", "Current VM health follow-up"), node("span", "badge", supportText(proposal.status)));
+        card.append(line);
+        const facts = node("dl", "detail-facts");
+        for (const [caption, value] of [["Proposal ID", id], ["Scope provider", scope.provider], ["Scope resource", scope.resource_id], ["Resource type", scope.resource_type], ["Region", scope.region], ["Account / subscription", scope.account_id ?? scope.subscription_id], ["Expected report revision", definition.expected_report_revision], ["Template", definition.template_id], ["Template version", definition.template_version], ["Policy", definition.policy_version], ["Risk", definition.risk], ["Reason", definition.reason], ["Definition digest", proposal.definition_hash], ["Definition expires", date(definition.expires_at)], ["Approval expires", proposal.approval ? date(proposal.approval.expires_at) : "Not approved"], ["Supersedes", proposal.supersedes], ["Superseded by", proposal.superseded_by]]) {
+          const entry = node("div", "wide");
+          entry.append(node("dt", "", caption), node("dd", "mono", supportText(value)));
+          facts.append(entry);
+        }
+        card.append(facts);
+        section(card, "Required permissions", array(definition.required_permissions).slice(0, 4).map((value) => supportText(value)), "No permissions were listed.");
+        const parameters = definition.parameters;
+        if (parameters && typeof parameters === "object") card.append(node("p", "field-help", `Observation: ${supportText(parameters.observation)} · Timeout: ${supportText(parameters.timeout_seconds)}s · Max states: ${supportText(parameters.max_states)} · Max output: ${supportText(parameters.max_output_bytes)} bytes`));
+        if (proposal.outcome && typeof proposal.outcome === "object") {
+          card.append(node("p", "field-help", `Health outcome: ${supportText(proposal.outcome.status)} · Observed: ${date(proposal.outcome.observed_at)}`));
+          section(card, "Observed states", array(proposal.outcome.states).slice(0, 16).map((value) => supportText(value)), "No states were returned.");
+          section(card, "Outcome limitations", array(proposal.outcome.limitations).slice(0, 16).map((value) => supportText(value)), "No additional limitations were returned.");
+        }
+        if (proposal.failure_code) card.append(node("p", "field-help", `Failure category: ${supportText(proposal.failure_code)}`));
+        const definitionExpiry = Date.parse(definition.expires_at);
+        const approvalExpiry = Date.parse(proposal.approval?.expires_at);
+        const expiry = proposal.status === "approved" ? Math.min(definitionExpiry, approvalExpiry) : definitionExpiry;
+        const expired = !Number.isFinite(expiry) || expiry <= Date.now();
+        if (!expired) nextExpiry = Math.min(nextExpiry, expiry);
+        const pending = proposal.status === "pending";
+        const approved = proposal.status === "approved";
+        const scoped = definition.incident_id === report.incident_id && definition.provider === report.provider && definition.resource_id === report.resource_id && definition.resource_type === report.resource_type && definition.template_id === "current-platform-health.v1";
+        const disabled = workflow.busy || workflow.uncertain || workflow.unavailable || !validProposal(proposal) || !scoped;
+        const decisionDisabled = disabled || expired;
+        const staleRevision = definition.expected_report_revision !== assistance.report_revision;
+        const revisable = ["pending", "approved", "rejected", "cancelled", "expired"].includes(proposal.status) && !proposal.superseded_by;
+        if (expired && (pending || approved || proposal.status === "expired")) card.append(node("p", "field-help", "Definition or approval expired; execution is unavailable. A retained proposal may be revised."));
+        if (!validProposal(proposal)) card.append(node("p", "field-help", "Incomplete proposal contract; actions are unavailable."));
+        if (!scoped) card.append(node("p", "field-help", "This proposal does not match this report's resource and fixed health template. Actions are unavailable."));
+        if (staleRevision && (pending || approved)) card.append(node("p", "field-help", "The report revision changed. Revise this proposal and approve the new definition before execution."));
+        const actions = node("div", "cloud-actions");
+        const perform = (action, extra = {}) => {
+          if (!current() || disabled || workflow.busy || workflow.uncertain || (action !== "revise" && (!Number.isFinite(expiry) || Date.now() >= expiry)) || (["approve", "execute"].includes(action) && staleRevision)) return;
+          if (action === "execute" && proposal.approval?.definition_hash !== proposal.definition_hash) return;
+          transact(`/api/v1/support/proposals/${encodeURIComponent(id)}/${action}`, { definition_hash: proposal.definition_hash, ...extra }, action);
+        };
+        if (pending) actions.append(button("Approve", () => perform("approve"), decisionDisabled || staleRevision));
+        if (pending || approved) actions.append(button("Reject", () => perform("reject"), decisionDisabled), button("Cancel proposal", () => perform("cancel"), decisionDisabled));
+        if (approved) actions.append(button("Execute current VM health", () => perform("execute"), decisionDisabled || staleRevision || proposal.approval?.definition_hash !== proposal.definition_hash));
+        card.append(actions);
+        if (revisable) {
+          const revision = reasonField(card, `support-revision-${index}`, "Revision reason (1–500 characters)", workflow.revisions.get(id) || "", (value) => workflow.revisions.set(id, value));
+          revision.disabled = disabled;
+          card.append(node("p", "field-help", "Revision creates a new pending proposal and cancels this proposal. Review the new definition digest and approve it before execution."));
+          card.append(button("Revise reason", () => {
+            const value = revision.value.trim();
+            if (!value || value.length > 500) { feedbackMessage("Enter a revision reason between 1 and 500 characters.", true); revision.focus(); return; }
+            perform("revise", { reason: value });
+          }, disabled));
+        }
+        content.append(card);
+      }
+      const history = array(assistance.proposals).slice(-100).flatMap((proposal) => array(proposal?.history).slice(-20).map((entry) => ({ status: entry?.status, at: entry?.at, detail: entry?.detail, actor: entry?.actor, proposal_id: proposalId(proposal) }))).sort((left, right) => (Date.parse(right.at) || 0) - (Date.parse(left.at) || 0)).slice(0, 20);
+      const historyHeading = node("div", "section-heading");
+      historyHeading.append(node("h3", "", "History · read only"), node("span", "section-count", history.length));
+      content.append(historyHeading, node("p", "field-help", "At most 20 history entries, proposals, and gaps are shown. History contains summary fields only."));
+      const historyList = node("ul", "support-history");
+      for (const entry of history) {
+        const row = node("li");
+        if (entry && typeof entry === "object") row.append(node("strong", "", `${supportText(entry.status)} · ${supportText(entry.actor)}`), node("p", "mono", supportText(entry.proposal_id)), node("p", "", date(entry.at)), node("p", "", supportText(entry.detail, "Status recorded.")));
+        else row.append(node("p", "", "Activity recorded; structured summary unavailable."));
+        historyList.append(row);
+      }
+      content.append(history.length ? historyList : node("p", "section-empty", "No history entries were returned."));
+      const restoreFocus = focusedId ? $(focusedId) : null;
+      if (restoreFocus && !restoreFocus.disabled) restoreFocus.focus({ preventScroll: true });
+      if (Number.isFinite(nextExpiry)) workflow.timer = setTimeout(render, Math.min(Math.max(nextExpiry - Date.now(), 1), 2147483647));
+    }
+    async function fetchAssistance() {
+      const data = await request(`/api/v1/reports/${encodeURIComponent(report.incident_id)}/support`, { signal: workflow.controller.signal });
+      if (!current()) return false;
+      const assistance = data?.assistance ?? data;
+      if (!assistance || typeof assistance !== "object" || assistance.incident_id !== report.incident_id || assistance.provider !== report.provider || assistance.resource_id !== report.resource_id || assistance.resource_type !== report.resource_type || !Number.isInteger(assistance.report_revision) || assistance.report_revision < 1 || !Array.isArray(assistance.evidence_gaps) || !Array.isArray(assistance.proposals)) throw new ApiError("The assistance response did not match the expected report and format.", 0);
+      workflow.assistance = assistance;
+      workflow.loaded = true;
+      workflow.uncertain = false;
+      workflow.unavailable = false;
+      return true;
+    }
+    async function refresh() {
+      if (!current() || workflow.busy) return;
+      workflow.busy = true;
+      render();
+      feedbackMessage("Loading structured assistance...");
+      try {
+        if (await fetchAssistance()) feedbackMessage("Assistance refreshed. Review scope, definition digest, template, and expiry before acting.");
+      } catch (error) {
+        if (!current()) return;
+        workflow.uncertain = true;
+        workflow.unavailable = error.status === 503;
+        feedbackMessage(error.status === 503 ? "Assistance and proposal APIs are development only and unavailable in production (HTTP 503)." : error.message, true);
+      } finally {
+        if (current()) { workflow.busy = false; render(); }
+      }
+    }
+    async function transact(path, payload, action) {
+      if (!current() || workflow.busy || workflow.uncertain || workflow.unavailable) return;
+      workflow.busy = true;
+      render();
+      feedbackMessage(action === "execute" ? "Executing the approved current VM health check..." : "Submitting proposal action...");
+      try {
+        const data = await request(path, { method: "POST", body: payload, signal: workflow.controller.signal });
+        if (!current()) return;
+        const proposal = data?.proposal ?? data;
+        if (!validProposal(proposal)) throw new ApiError("The service returned an incomplete proposal. Refresh assistance before continuing.", 0);
+        workflow.reason = action === "propose" ? "" : workflow.reason;
+        workflow.revisions.clear();
+        if (action === "execute") {
+          if (!data.report || data.report.incident_id !== report.incident_id || proposal.status !== "completed") throw new ApiError("Execution returned no completed proposal and matching report. Refresh reports and assistance before continuing.", 0);
+          await loadReports({ quiet: true });
+          if (!current()) return;
+          await selectReport(report.incident_id);
+          if (state.epoch === workflow.epoch && state.selected === report.incident_id && state.support) await state.support.refresh();
+          return;
+        }
+        workflow.uncertain = true;
+        if (await fetchAssistance()) feedbackMessage(action === "revise" ? `Revision created proposal ${proposalId(proposal)} and superseded the old proposal. Review and approve the new definition before execution.` : "Proposal action accepted. Assistance refreshed; review the current definition before the next action.");
+      } catch (error) {
+        if (!current()) return;
+        workflow.uncertain = true;
+        workflow.unavailable = error.status === 503;
+        feedbackMessage(error.status === 503 ? "Proposal APIs are development only and unavailable in production (HTTP 503)." : `${error.message} The action may have reached the service. Refresh assistance to reconcile its status before another action.`, true);
+      } finally {
+        if (current()) { workflow.busy = false; render(); }
+      }
+    }
+    workflow.refresh = refresh;
+    load.addEventListener("click", refresh);
+    body.append(panel);
+  }
   function renderDetail(report, focus = false) {
     const body = node("div", "detail-body");
     const tags = node("div", "tag-line");
@@ -428,6 +696,7 @@
     }
     section(body, "Evidence gaps", report.evidence_gaps, "No evidence gaps were listed. This does not establish completeness or verify a root cause.", "gap-list");
     section(body, "Recommended actions · for human review", report.recommended_actions, "No recommended actions were included.");
+    addSupport(body, report);
     const actions = node("div", "detail-actions");
     const email = node("button", "button", "Email this report");
     email.type = "button";
@@ -463,6 +732,7 @@
     if (focus) title.focus();
   }
   async function selectReport(id) {
+    clearSupport();
     const sequence = ++state.detailRequest;
     const epoch = state.epoch;
     state.selected = id;

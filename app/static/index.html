@@ -44,11 +44,19 @@
           <div id="list-empty" class="empty-state"><span class="empty-symbol" aria-hidden="true">▤</span><h3 id="empty-title">Your investigations start here</h3><p id="empty-description">Connect with a bearer token to explore reports or submit a normalized event.</p></div>
           <div class="panel-footer"><span id="visible-count">No reports loaded</span><span>Temporary report cache</span></div>
         </section>
-        <section class="panel detail-panel" aria-labelledby="detail-heading" aria-busy="false" id="detail-panel"><div class="panel-heading"><div><p class="eyebrow">INVESTIGATION</p><h2 id="detail-heading">Report details</h2></div><span class="read-only-tag">Read only</span></div><div id="detail-placeholder" class="empty-state detail-empty"><span class="empty-symbol" aria-hidden="true">◎</span><h3>Select an incident</h3><p>Explore findings, supporting evidence, and what still needs to be investigated.</p></div><div id="detail-content" hidden></div></section>
+        <section class="panel detail-panel" aria-labelledby="detail-heading" aria-busy="false" id="detail-panel"><div class="panel-heading"><div><p class="eyebrow">INVESTIGATION</p><h2 id="detail-heading">Report details</h2></div><span class="read-only-tag">VM health only</span></div><div id="detail-placeholder" class="empty-state detail-empty"><span class="empty-symbol" aria-hidden="true">◎</span><h3>Select an incident</h3><p>Explore findings, supporting evidence, and what still needs to be investigated.</p></div><div id="detail-content" hidden></div></section>
       </div>
       <footer class="page-footer"><span>Cloud Atlas · Multi-cloud visibility</span><span>Reports may expire from temporary storage.</span></footer>
     </main>
   </div>
+  <template id="support-template">
+    <section class="support-panel" aria-label="Report assistance and proposals" aria-busy="false">
+      <div class="support-heading"><h3>Assistance &amp; follow-up proposals</h3><button class="button button-small" type="button" data-support-load>Load assistance</button></div>
+      <p class="support-warning">Development only. These APIs are unavailable in production (HTTP 503). Approval uses the shared operator token and is not independent approval. Execution checks current VM health only; no remediation is performed.</p>
+      <div class="message" role="status" aria-live="polite" data-support-message hidden></div>
+      <div data-support-content></div>
+    </section>
+  </template>
   <dialog id="auth-dialog" aria-labelledby="auth-title" aria-describedby="auth-description">
     <form id="auth-form" class="dialog-body"><div class="dialog-heading"><div><p class="eyebrow">WORKSPACE ACCESS</p><h2 id="auth-title">Connect to your service</h2></div><button class="icon-button" type="button" data-close="auth-dialog" aria-label="Close connection dialog">×</button></div><p id="auth-description" class="subtitle">Enter your operator token to access reports and cloud connections. The token is held only in memory and cleared when you disconnect or reload. In development, the service may use one shared token for operator access and event submission.</p><label for="token">Operator token</label><input id="token" name="token" type="password" autocomplete="off" spellcheck="false" required placeholder="Paste your operator token" aria-describedby="token-help"><p class="field-help" id="token-help">Enter the token only, without the “Bearer” prefix. Production event submission uses a separate webhook token in the event form.</p><div id="auth-message" class="message" role="status" aria-live="polite" hidden></div><div class="dialog-footer"><button class="button" type="button" data-close="auth-dialog">Cancel</button><button class="button button-primary" id="auth-submit" type="submit">Connect</button></div></form>
   </dialog>

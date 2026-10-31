@@ -96,6 +96,8 @@ class HealthObservation(BaseModel):
         if any(len(state) > 160 for state in self.states) or any(len(item) > 512 for item in self.limitations):
             raise ValueError("Observation exceeds output limits")
         self.observed_at = self.observed_at.astimezone(timezone.utc)
+        if len(self.model_dump_json().encode("utf-8")) > 8192:
+            raise ValueError("Observation exceeds byte budget")
         return self
 
 
@@ -192,12 +194,16 @@ class CloudService:
                 self._resources.pop(next(iter(self._resources)))
         return {"items": result, "total": len(result), "expires_in_seconds": 600}
 
-    def investigate(self, selection):
+    def resolve_resource(self, selection):
         with self._lock:
             entry = self._resources.get(selection.resource_key)
             if not entry or entry["expires"] <= time.monotonic():
                 raise ProviderError("expired", "Resource selection expired; discover resources again")
             resource = dict(entry["resource"])
+        return resource
+
+    def investigate(self, selection):
+        resource = self.resolve_resource(selection)
         observed = self._bounded(lambda: HealthObservation.model_validate(self._adapter(resource["provider"]).health(resource)))
         state = observed.status
         states = observed.states
@@ -218,7 +224,7 @@ class CloudService:
                 evidence=[Evidence(source=query_id, description=", ".join(states) or "No platform health states returned", observed_at=observed.observed_at, query_reference=query_id, supports_cause=False)])],
             evidence_gaps=["Metrics, logs, audit changes and dependencies were not collected by this bounded health check", "A current platform observation does not establish historical availability or root cause"],
             recommended_actions=["Review the platform observation and correlate approved telemetry before drawing causal conclusions"],
-            metadata={"investigation_mode": "deterministic_read_only", "diagnostic_templates_executed": 1, "query_template": query_id, "scope": event.labels, "observed_at": observed.observed_at.isoformat(), "limitations": observed.limitations},
+            metadata={"investigation_mode": "deterministic_read_only", "diagnostic_templates_executed": 1, "query_template": query_id, "scope": event.labels, "observed_at": observed.observed_at.isoformat(), "limitations": observed.limitations, "platform_health": observed.model_dump(mode="json")},
         )
         return event, report
 

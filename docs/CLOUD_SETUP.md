@@ -66,12 +66,12 @@ Each operation has two global worker slots, a 30-second response wait and adapte
 | --- | --- |
 | UI/API, Docker/EC2 pipeline, PostgreSQL compact reports | Implemented; current-release EC2 evidence required. |
 | Azure VM / AWS EC2 inventory and current platform health | Implemented narrow slice; live staging permissions/telemetry validation pending. |
-| Public HTTPS | Config supplied; domain/DNS/security-group/operator-token prerequisites required. |
+| Public HTTPS | Verified development exposure at https://rca.genixtec.com; certificate renewal/network hardening acceptance pending. |
 | Native Azure/AWS alerts and replay-safe authentication | Pending. Only normalized event JSON is supported today. |
 | Metrics, logs, Activity Log/CloudTrail, fixed query catalog | Pending. |
 | Dependencies, timelines, deterministic deep RCA rule packs | Pending. Starter events do not trigger cloud diagnostics automatically. |
 | Scheduled checks and monitoring coverage | Pending. TTL cleanup is not monitoring. |
-| Human identities/RBAC, typed proposals, approvals and report revisions | Pending. Shared operator token and manual health checks are not this workflow. |
+| Human identities/RBAC and independent approvals | Pending. Development-only fixed-health proposals, exact-definition approval/expiry and report revisions exist; shared operator approval is not independent authorization. |
 | Automatic email/outbox/retries and receipt validation | Pending. Manual SMTP submission exists. |
 | Backup restore, dependency audit/pinning, HA and security acceptance | Pending; production remains NO-GO. |
 

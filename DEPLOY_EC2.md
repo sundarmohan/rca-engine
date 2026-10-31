@@ -78,6 +78,8 @@ For this user-authorized development bootstrap only (`APP_ENV=development`), a p
 
 ## Access and verification
 
+The development UI is exposed at <https://rca.genixtec.com/>. HTTPS readiness, security headers, denied unauthenticated report access and public documentation blocking were verified on 2026-10-31. This verifies the development deployment, not production readiness or live Azure/AWS permissions. Use the configured operator token to connect. The development-only assistance controls allow approved fixed VM health follow-ups and report revisions; OIDC/RBAC and independent approvers remain required before production support execution.
+
 For the default loopback binding, run locally (replace the placeholders):
 
 ```bash

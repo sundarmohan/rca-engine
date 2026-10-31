@@ -12,11 +12,7 @@ class InvestigationOrchestrator:
 
     def investigate(self, event: IncomingEvent) -> RCAReport:
         findings = self.rule_engine.evaluate_event(event)
-        high_findings = [f for f in findings if f.severity.lower() in {"critical", "high"}]
-        confidence = "medium" if high_findings else "low"
         cause = "Undetermined from currently available evidence"
-        if high_findings:
-            cause = "A high-severity event was reported; underlying cause requires corroborating diagnostic evidence"
         return RCAReport(
             provider=event.provider,
             resource_id=event.resource_id,
@@ -26,10 +22,11 @@ class InvestigationOrchestrator:
             summary=event.summary,
             incident_time=event.occurred_at,
             probable_root_cause=cause,
-            confidence=confidence,
+            status="needs_human_assistance",
+            confidence="low",
             findings=findings,
             evidence_gaps=[
-                "Cloud provider credentials and read-only diagnostic adapters are not configured in this starter build.",
+                "This normalized event intake did not execute live provider diagnostics; configuration alone is not corroborating evidence.",
                 "Correlated logs, metrics, configuration changes and dependency health have not yet been queried.",
             ],
             recommended_actions=[
